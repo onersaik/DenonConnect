@@ -2,95 +2,184 @@ swift-driver version: 1.90.11.1 Apple Swift version 5.10 (swiftlang-5.10.0.13 cl
 Target: arm64-apple-macosx14.0
 Building for debugging...
 [0/12] Write sources
+[3/12] Write SC6000ConnectApp-entitlement.plist
 [3/12] Write DJSimulatorApp-entitlement.plist
-[4/12] Write SC6000ConnectApp-entitlement.plist
 [5/12] Write swift-version-76B232A4806BA581.txt
 [7/29] Emitting module StageLinqKit
-[8/36] Compiling StageLinqKit PioneerSimulator.swift
-[9/36] Compiling StageLinqKit Sockets.swift
-[10/36] Compiling StageLinqKit StageLinqManager.swift
-[11/36] Compiling StageLinqKit StateMapService.swift
-[12/36] Compiling StageLinqKit StatePaths.swift
-[13/36] Compiling StageLinqKit StateValue.swift
-[14/36] Compiling StageLinqKit TestLink.swift
-[15/36] Compiling StageLinqKit SyncSnapshot.swift
-[16/36] Compiling StageLinqKit DBServerClient.swift
-[17/36] Compiling StageLinqKit DJLinkProtocol.swift
-[18/36] Compiling StageLinqKit NetworkInfo.swift
-[19/36] Compiling StageLinqKit ProDJLinkManager.swift
-[20/36] Compiling StageLinqKit Protocol.swift
-[21/36] Compiling StageLinqKit ServiceConnection.swift
-[22/36] Compiling StageLinqKit DenonSimulator.swift
-[23/36] Compiling StageLinqKit BeatInfoService.swift
+[8/37] Compiling StageLinqKit ResolumeBridge.swift
+[9/37] Compiling StageLinqKit SyncSnapshot.swift
+[10/37] Compiling StageLinqKit DBServerClient.swift
+[11/37] Compiling StageLinqKit DJLinkProtocol.swift
+[12/37] Compiling StageLinqKit NetworkInfo.swift
+[13/37] Compiling StageLinqKit ProDJLinkManager.swift
+[14/37] Compiling StageLinqKit Protocol.swift
+[15/37] Compiling StageLinqKit ServiceConnection.swift
+[16/37] Compiling StageLinqKit DenonSimulator.swift
+[17/37] Compiling StageLinqKit PioneerSimulator.swift
+[18/37] Compiling StageLinqKit Sockets.swift
+[19/37] Compiling StageLinqKit StageLinqManager.swift
+[20/37] Compiling StageLinqKit StateMapService.swift
+[21/37] Compiling StageLinqKit StatePaths.swift
+[22/37] Compiling StageLinqKit StateValue.swift
+[23/37] Compiling StageLinqKit TestLink.swift
+[24/37] Compiling StageLinqKit BeatInfoService.swift
 /Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:148:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
             guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
                                                                                      ^
-[24/36] Compiling StageLinqKit ByteIO.swift
+[25/37] Compiling StageLinqKit ByteIO.swift
 /Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:148:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
             guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
                                                                                      ^
-[25/36] Compiling StageLinqKit Models.swift
+[26/37] Compiling StageLinqKit Models.swift
 /Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:148:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
             guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
                                                                                      ^
-[26/36] Compiling StageLinqKit NetworkDevice.swift
+[27/37] Compiling StageLinqKit MusicalKey.swift
 /Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:148:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
             guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
                                                                                      ^
-[27/36] Compiling StageLinqKit LTCGenerator.swift
+[28/37] Compiling StageLinqKit NetworkDevice.swift
 /Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:148:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
             guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
                                                                                      ^
-[28/36] Compiling StageLinqKit MIDITimecodeGenerator.swift
+[29/37] Compiling StageLinqKit LTCGenerator.swift
 /Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:148:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
             guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
                                                                                      ^
-[29/36] Compiling StageLinqKit OSCClient.swift
+[30/37] Compiling StageLinqKit MIDITimecodeGenerator.swift
 /Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:148:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
             guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
                                                                                      ^
-[30/36] Compiling StageLinqKit ResolumeBridge.swift
+[31/37] Compiling StageLinqKit OSCClient.swift
 /Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:148:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
             guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
                                                                                      ^
-[31/46] Emitting module SC6000ConnectApp
-[32/46] Compiling SC6000ConnectApp ArtworkFetcher.swift
-[33/46] Compiling SC6000ConnectApp ContentView.swift
-[34/46] Compiling SC6000ConnectApp LogView.swift
-[35/46] Compiling SC6000ConnectApp OutputController.swift
-[36/46] Compiling SC6000ConnectApp OutputsView.swift
-[37/46] Compiling SC6000ConnectApp PlayerDeckRow.swift
-[38/46] Compiling SC6000ConnectApp SC6000ConnectApp.swift
-[39/49] Emitting module DJSimulatorApp
-[40/49] Compiling DJSimulatorApp DJSimulatorApp.swift
-/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:224:40: warning: reference to captured var 'self' in concurrently-executing code; this is an error in Swift 6
+error: emit-module command failed with exit code 1 (use -v to see invocation)
+[32/48] Emitting module SC6000ConnectApp
+/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/ActivationView.swift:7:37: error: cannot find type 'LicenseStore' in scope
+    @EnvironmentObject var license: LicenseStore
+                                    ^~~~~~~~~~~~
+/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/ContentView.swift:26:37: error: cannot find type 'LicenseStore' in scope
+    @EnvironmentObject var license: LicenseStore
+                                    ^~~~~~~~~~~~
+/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/OutputsView.swift:13:37: error: cannot find type 'LicenseStore' in scope
+    @EnvironmentObject var license: LicenseStore
+                                    ^~~~~~~~~~~~
+/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/SC6000ConnectApp.swift:14:40: error: cannot find 'LicenseStore' in scope
+    @StateObject private var license = LicenseStore()
+                                       ^~~~~~~~~~~~
+[33/48] Compiling SC6000ConnectApp ActivationView.swift
+/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/ActivationView.swift:7:37: error: cannot find type 'LicenseStore' in scope
+    @EnvironmentObject var license: LicenseStore
+                                    ^~~~~~~~~~~~
+/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/ContentView.swift:26:37: error: cannot find type 'LicenseStore' in scope
+    @EnvironmentObject var license: LicenseStore
+                                    ^~~~~~~~~~~~
+/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/OutputsView.swift:13:37: error: cannot find type 'LicenseStore' in scope
+    @EnvironmentObject var license: LicenseStore
+                                    ^~~~~~~~~~~~
+[34/48] Compiling SC6000ConnectApp ArtworkFetcher.swift
+/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/ActivationView.swift:7:37: error: cannot find type 'LicenseStore' in scope
+    @EnvironmentObject var license: LicenseStore
+                                    ^~~~~~~~~~~~
+/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/ContentView.swift:26:37: error: cannot find type 'LicenseStore' in scope
+    @EnvironmentObject var license: LicenseStore
+                                    ^~~~~~~~~~~~
+/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/OutputsView.swift:13:37: error: cannot find type 'LicenseStore' in scope
+    @EnvironmentObject var license: LicenseStore
+                                    ^~~~~~~~~~~~
+[35/48] Compiling SC6000ConnectApp ContentView.swift
+/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/ActivationView.swift:7:37: error: cannot find type 'LicenseStore' in scope
+    @EnvironmentObject var license: LicenseStore
+                                    ^~~~~~~~~~~~
+/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/ContentView.swift:26:37: error: cannot find type 'LicenseStore' in scope
+    @EnvironmentObject var license: LicenseStore
+                                    ^~~~~~~~~~~~
+/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/OutputsView.swift:13:37: error: cannot find type 'LicenseStore' in scope
+    @EnvironmentObject var license: LicenseStore
+                                    ^~~~~~~~~~~~
+[36/48] Compiling SC6000ConnectApp LogView.swift
+/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/ActivationView.swift:7:37: error: cannot find type 'LicenseStore' in scope
+    @EnvironmentObject var license: LicenseStore
+                                    ^~~~~~~~~~~~
+/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/ContentView.swift:26:37: error: cannot find type 'LicenseStore' in scope
+    @EnvironmentObject var license: LicenseStore
+                                    ^~~~~~~~~~~~
+/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/OutputsView.swift:13:37: error: cannot find type 'LicenseStore' in scope
+    @EnvironmentObject var license: LicenseStore
+                                    ^~~~~~~~~~~~
+[37/48] Compiling SC6000ConnectApp OutputController.swift
+/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/OutputsView.swift:13:37: error: cannot find type 'LicenseStore' in scope
+    @EnvironmentObject var license: LicenseStore
+                                    ^~~~~~~~~~~~
+/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/SC6000ConnectApp.swift:14:40: error: cannot find 'LicenseStore' in scope
+    @StateObject private var license = LicenseStore()
+                                       ^~~~~~~~~~~~
+/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/ContentView.swift:26:37: error: cannot find type 'LicenseStore' in scope
+    @EnvironmentObject var license: LicenseStore
+                                    ^~~~~~~~~~~~
+[38/48] Compiling SC6000ConnectApp OutputsView.swift
+/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/OutputsView.swift:13:37: error: cannot find type 'LicenseStore' in scope
+    @EnvironmentObject var license: LicenseStore
+                                    ^~~~~~~~~~~~
+/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/SC6000ConnectApp.swift:14:40: error: cannot find 'LicenseStore' in scope
+    @StateObject private var license = LicenseStore()
+                                       ^~~~~~~~~~~~
+/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/ContentView.swift:26:37: error: cannot find type 'LicenseStore' in scope
+    @EnvironmentObject var license: LicenseStore
+                                    ^~~~~~~~~~~~
+[39/48] Compiling SC6000ConnectApp PlayerDeckRow.swift
+/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/OutputsView.swift:13:37: error: cannot find type 'LicenseStore' in scope
+    @EnvironmentObject var license: LicenseStore
+                                    ^~~~~~~~~~~~
+/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/SC6000ConnectApp.swift:14:40: error: cannot find 'LicenseStore' in scope
+    @StateObject private var license = LicenseStore()
+                                       ^~~~~~~~~~~~
+/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/ContentView.swift:26:37: error: cannot find type 'LicenseStore' in scope
+    @EnvironmentObject var license: LicenseStore
+                                    ^~~~~~~~~~~~
+[40/48] Compiling SC6000ConnectApp SC6000ConnectApp.swift
+/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/OutputsView.swift:13:37: error: cannot find type 'LicenseStore' in scope
+    @EnvironmentObject var license: LicenseStore
+                                    ^~~~~~~~~~~~
+/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/SC6000ConnectApp.swift:14:40: error: cannot find 'LicenseStore' in scope
+    @StateObject private var license = LicenseStore()
+                                       ^~~~~~~~~~~~
+/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/ContentView.swift:26:37: error: cannot find type 'LicenseStore' in scope
+    @EnvironmentObject var license: LicenseStore
+                                    ^~~~~~~~~~~~
+[41/51] Compiling SC6000ConnectApp Theme.swift
+[42/51] Compiling SC6000ConnectApp WaveformView.swift
+[43/51] Compiling SC6000ConnectApp WebServer.swift
+error: fatalError
+[44/51] Emitting module DJSimulatorApp
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:230:40: warning: reference to captured var 'self' in concurrently-executing code; this is an error in Swift 6
             DispatchQueue.main.async { self?.syncPositions() }
                                        ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:612:27: warning: 'commonMetadata' was deprecated in macOS 13.0: Use load(.commonMetadata) instead
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:715:27: warning: 'commonMetadata' was deprecated in macOS 13.0: Use load(.commonMetadata) instead
         let items = asset.commonMetadata + asset.metadata
                           ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:612:50: warning: 'metadata' was deprecated in macOS 13.0: Use load(.metadata) instead
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:715:50: warning: 'metadata' was deprecated in macOS 13.0: Use load(.metadata) instead
         let items = asset.commonMetadata + asset.metadata
                                                  ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:622:33: warning: 'numberValue' was deprecated in macOS 13.0: Use load(.numberValue) instead
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:731:33: warning: 'numberValue' was deprecated in macOS 13.0: Use load(.numberValue) instead
                 if let n = item.numberValue?.doubleValue, (60...220).contains(n) { bpm = n }
                                 ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:623:38: warning: 'stringValue' was deprecated in macOS 13.0: Use load(.stringValue) instead
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:732:38: warning: 'stringValue' was deprecated in macOS 13.0: Use load(.stringValue) instead
                 else if let s = item.stringValue {
                                      ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:629:33: warning: 'stringValue' was deprecated in macOS 13.0: Use load(.stringValue) instead
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:738:33: warning: 'stringValue' was deprecated in macOS 13.0: Use load(.stringValue) instead
                 if let s = item.stringValue { musKey = s.trimmingCharacters(in: .whitespacesAndNewlines) }
                                 ^
-[40/49] Write Objects.LinkFileList
-[42/49] Compiling SC6000ConnectApp Theme.swift
-[43/49] Compiling SC6000ConnectApp WaveformView.swift
-[44/49] Compiling SC6000ConnectApp WebServer.swift
-[44/49] Write Objects.LinkFileList
-[45/49] Linking DJSimulatorApp
-[46/49] Applying DJSimulatorApp
-[47/49] Linking SC6000ConnectApp
-[48/49] Applying SC6000ConnectApp
-Build complete! (16.98s)
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:741:33: warning: 'stringValue' was deprecated in macOS 13.0: Use load(.stringValue) instead
+                if let s = item.stringValue { genre = s.trimmingCharacters(in: .whitespacesAndNewlines) }
+                                ^
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:744:33: warning: 'stringValue' was deprecated in macOS 13.0: Use load(.stringValue) instead
+                if let s = item.stringValue { album = s.trimmingCharacters(in: .whitespacesAndNewlines) }
+                                ^
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:747:33: warning: 'stringValue' was deprecated in macOS 13.0: Use load(.stringValue) instead
+                if let s = item.stringValue { comment = s.trimmingCharacters(in: .whitespacesAndNewlines) }
+                                ^
 === RELEASE ===
 Building for production...
 [0/8] Write sources
@@ -99,30 +188,46 @@ Building for production...
 /Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:148:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
             guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
                                                                                      ^
-[6/11] Compiling DJSimulatorApp DJSimulatorApp.swift
-/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:224:40: warning: reference to captured var 'self' in concurrently-executing code; this is an error in Swift 6
+[6/11] Compiling SC6000ConnectApp ActivationView.swift
+/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/ActivationView.swift:7:37: error: cannot find type 'LicenseStore' in scope
+    @EnvironmentObject var license: LicenseStore
+                                    ^~~~~~~~~~~~
+/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/ContentView.swift:26:37: error: cannot find type 'LicenseStore' in scope
+    @EnvironmentObject var license: LicenseStore
+                                    ^~~~~~~~~~~~
+/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/OutputsView.swift:13:37: error: cannot find type 'LicenseStore' in scope
+    @EnvironmentObject var license: LicenseStore
+                                    ^~~~~~~~~~~~
+/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/SC6000ConnectApp.swift:14:40: error: cannot find 'LicenseStore' in scope
+    @StateObject private var license = LicenseStore()
+                                       ^~~~~~~~~~~~
+error: fatalError
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:230:40: warning: reference to captured var 'self' in concurrently-executing code; this is an error in Swift 6
             DispatchQueue.main.async { self?.syncPositions() }
                                        ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:612:27: warning: 'commonMetadata' was deprecated in macOS 13.0: Use load(.commonMetadata) instead
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:715:27: warning: 'commonMetadata' was deprecated in macOS 13.0: Use load(.commonMetadata) instead
         let items = asset.commonMetadata + asset.metadata
                           ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:612:50: warning: 'metadata' was deprecated in macOS 13.0: Use load(.metadata) instead
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:715:50: warning: 'metadata' was deprecated in macOS 13.0: Use load(.metadata) instead
         let items = asset.commonMetadata + asset.metadata
                                                  ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:622:33: warning: 'numberValue' was deprecated in macOS 13.0: Use load(.numberValue) instead
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:731:33: warning: 'numberValue' was deprecated in macOS 13.0: Use load(.numberValue) instead
                 if let n = item.numberValue?.doubleValue, (60...220).contains(n) { bpm = n }
                                 ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:623:38: warning: 'stringValue' was deprecated in macOS 13.0: Use load(.stringValue) instead
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:732:38: warning: 'stringValue' was deprecated in macOS 13.0: Use load(.stringValue) instead
                 else if let s = item.stringValue {
                                      ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:629:33: warning: 'stringValue' was deprecated in macOS 13.0: Use load(.stringValue) instead
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:738:33: warning: 'stringValue' was deprecated in macOS 13.0: Use load(.stringValue) instead
                 if let s = item.stringValue { musKey = s.trimmingCharacters(in: .whitespacesAndNewlines) }
                                 ^
-[6/11] Write Objects.LinkFileList
-[7/11] Linking DJSimulatorApp
-[9/11] Compiling SC6000ConnectApp ArtworkFetcher.swift
-[9/11] Write Objects.LinkFileList
-[10/11] Linking SC6000ConnectApp
-Build complete! (20.99s)
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:741:33: warning: 'stringValue' was deprecated in macOS 13.0: Use load(.stringValue) instead
+                if let s = item.stringValue { genre = s.trimmingCharacters(in: .whitespacesAndNewlines) }
+                                ^
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:744:33: warning: 'stringValue' was deprecated in macOS 13.0: Use load(.stringValue) instead
+                if let s = item.stringValue { album = s.trimmingCharacters(in: .whitespacesAndNewlines) }
+                                ^
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:747:33: warning: 'stringValue' was deprecated in macOS 13.0: Use load(.stringValue) instead
+                if let s = item.stringValue { comment = s.trimmingCharacters(in: .whitespacesAndNewlines) }
+                                ^
 
-=== resultado: build=success release=success sha=5d7da5ae93ac7b475370a7a352b1bdac162a1d69 ===
+=== resultado: build=failure release=failure sha=6524d2ea66e89466f8d749faeac97f6b2ce51dcd ===
