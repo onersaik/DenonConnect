@@ -2,8 +2,8 @@ swift-driver version: 1.90.11.1 Apple Swift version 5.10 (swiftlang-5.10.0.13 cl
 Target: arm64-apple-macosx14.0
 Building for debugging...
 [0/12] Write sources
-[3/12] Write SC6000ConnectApp-entitlement.plist
-[4/12] Write DJSimulatorApp-entitlement.plist
+[0/12] Write DJSimulatorApp-entitlement.plist
+[0/12] Write SC6000ConnectApp-entitlement.plist
 [5/12] Write swift-version-76B232A4806BA581.txt
 [7/27] Emitting module StageLinqKit
 [8/33] Compiling StageLinqKit PioneerSimulator.swift
@@ -20,41 +20,84 @@ Building for debugging...
 [19/33] Compiling StageLinqKit ServiceConnection.swift
 [20/33] Compiling StageLinqKit DenonSimulator.swift
 [21/33] Compiling StageLinqKit BeatInfoService.swift
+/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:141:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
+            guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
+                                                                                     ^
 [22/33] Compiling StageLinqKit ByteIO.swift
+/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:141:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
+            guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
+                                                                                     ^
 [23/33] Compiling StageLinqKit Models.swift
+/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:141:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
+            guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
+                                                                                     ^
 [24/33] Compiling StageLinqKit NetworkDevice.swift
+/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:141:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
+            guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
+                                                                                     ^
 [25/33] Compiling StageLinqKit LTCGenerator.swift
+/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:141:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
+            guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
+                                                                                     ^
 [26/33] Compiling StageLinqKit OSCClient.swift
+/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:141:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
+            guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
+                                                                                     ^
 [27/33] Compiling StageLinqKit ResolumeBridge.swift
-[28/42] Emitting module SC6000ConnectApp
-[29/44] Compiling SC6000ConnectApp Theme.swift
-[30/44] Compiling SC6000ConnectApp WaveformView.swift
-[31/44] Emitting module DJSimulatorApp
-[32/44] Compiling DJSimulatorApp DJSimulatorApp.swift
-[32/44] Write Objects.LinkFileList
-[34/44] Compiling SC6000ConnectApp ContentView.swift
-[35/44] Compiling SC6000ConnectApp LogView.swift
-[36/44] Compiling SC6000ConnectApp OutputController.swift
-[37/44] Compiling SC6000ConnectApp OutputsView.swift
-[38/44] Compiling SC6000ConnectApp PlayerDeckRow.swift
-[39/44] Compiling SC6000ConnectApp SC6000ConnectApp.swift
-[39/44] Write Objects.LinkFileList
-[40/44] Linking DJSimulatorApp
-[41/44] Linking SC6000ConnectApp
-[42/44] Applying DJSimulatorApp
-[43/44] Applying SC6000ConnectApp
-Build complete! (10.59s)
+/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:141:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
+            guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
+                                                                                     ^
+[28/42] Compiling SC6000ConnectApp OutputsView.swift
+/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/OutputController.swift:24:41: error: cannot find type 'AudioDeviceID' in scope
+    @Published var ltcSelectedDeviceID: AudioDeviceID = 0   // 0 = por defecto del sistema
+                                        ^~~~~~~~~~~~~
+[29/42] Compiling SC6000ConnectApp PlayerDeckRow.swift
+/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/OutputController.swift:24:41: error: cannot find type 'AudioDeviceID' in scope
+    @Published var ltcSelectedDeviceID: AudioDeviceID = 0   // 0 = por defecto del sistema
+                                        ^~~~~~~~~~~~~
+[30/42] Compiling SC6000ConnectApp SC6000ConnectApp.swift
+/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/OutputController.swift:24:41: error: cannot find type 'AudioDeviceID' in scope
+    @Published var ltcSelectedDeviceID: AudioDeviceID = 0   // 0 = por defecto del sistema
+                                        ^~~~~~~~~~~~~
+error: emit-module command failed with exit code 1 (use -v to see invocation)
+[31/44] Emitting module SC6000ConnectApp
+/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/OutputController.swift:24:41: error: cannot find type 'AudioDeviceID' in scope
+    @Published var ltcSelectedDeviceID: AudioDeviceID = 0   // 0 = por defecto del sistema
+                                        ^~~~~~~~~~~~~
+[32/44] Compiling SC6000ConnectApp ContentView.swift
+/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/OutputController.swift:24:41: error: cannot find type 'AudioDeviceID' in scope
+    @Published var ltcSelectedDeviceID: AudioDeviceID = 0   // 0 = por defecto del sistema
+                                        ^~~~~~~~~~~~~
+[33/44] Compiling SC6000ConnectApp LogView.swift
+/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/OutputController.swift:24:41: error: cannot find type 'AudioDeviceID' in scope
+    @Published var ltcSelectedDeviceID: AudioDeviceID = 0   // 0 = por defecto del sistema
+                                        ^~~~~~~~~~~~~
+[34/44] Compiling SC6000ConnectApp OutputController.swift
+/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/OutputController.swift:24:41: error: cannot find type 'AudioDeviceID' in scope
+    @Published var ltcSelectedDeviceID: AudioDeviceID = 0   // 0 = por defecto del sistema
+                                        ^~~~~~~~~~~~~
+[35/44] Emitting module DJSimulatorApp
+[36/44] Compiling DJSimulatorApp DJSimulatorApp.swift
+[36/44] Write Objects.LinkFileList
+[38/44] Compiling SC6000ConnectApp Theme.swift
+[39/44] Compiling SC6000ConnectApp WaveformView.swift
+error: fatalError
+[39/44] Linking DJSimulatorApp
 === RELEASE ===
 Building for production...
 [0/8] Write sources
 [3/8] Write swift-version-76B232A4806BA581.txt
 [5/9] Compiling StageLinqKit BeatInfoService.swift
+/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:141:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
+            guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
+                                                                                     ^
 [6/11] Compiling DJSimulatorApp DJSimulatorApp.swift
 [6/11] Write Objects.LinkFileList
-[7/11] Linking DJSimulatorApp
-[9/11] Compiling SC6000ConnectApp ContentView.swift
-[9/11] Write Objects.LinkFileList
-[10/11] Linking SC6000ConnectApp
-Build complete! (9.46s)
+[8/11] Compiling SC6000ConnectApp ContentView.swift
+/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/OutputController.swift:24:41: error: cannot find type 'AudioDeviceID' in scope
+    @Published var ltcSelectedDeviceID: AudioDeviceID = 0   // 0 = por defecto del sistema
+                                        ^~~~~~~~~~~~~
+error: fatalError
+[8/11] Linking DJSimulatorApp
 
-=== resultado: build=success release=success sha=3452325cada11926bcafe78253c6f1fbcc7b727d ===
+=== resultado: build=failure release=failure sha=9b0a3d0a5c28b91bfea2b89dbc6bc8f2de2ec97d ===
