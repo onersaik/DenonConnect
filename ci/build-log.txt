@@ -2,35 +2,35 @@ swift-driver version: 1.90.11.1 Apple Swift version 5.10 (swiftlang-5.10.0.13 cl
 Target: arm64-apple-macosx14.0
 Building for debugging...
 [0/7] Write sources
-[0/7] Write SC6000ConnectApp-entitlement.plist
+[2/7] Write SC6000ConnectApp-entitlement.plist
 [3/7] Write swift-version-76B232A4806BA581.txt
-[5/18] Compiling StageLinqKit BeatInfoService.swift
-[6/18] Compiling StageLinqKit ByteIO.swift
-[7/18] Compiling StageLinqKit Models.swift
-[8/18] Compiling StageLinqKit NetworkDevice.swift
-[9/18] Compiling StageLinqKit DJLinkProtocol.swift
-[10/18] Emitting module StageLinqKit
-[11/18] Compiling StageLinqKit NetworkInfo.swift
-[12/18] Compiling StageLinqKit ProDJLinkManager.swift
-[13/18] Compiling StageLinqKit Protocol.swift
-[14/18] Compiling StageLinqKit ServiceConnection.swift
-[15/18] Compiling StageLinqKit Sockets.swift
-[16/22] Compiling StageLinqKit StageLinqManager.swift
-[17/22] Compiling StageLinqKit StateMapService.swift
-[18/22] Compiling StageLinqKit StatePaths.swift
-[19/22] Compiling StageLinqKit StateValue.swift
+[5/18] Emitting module StageLinqKit
+[6/22] Compiling StageLinqKit BeatInfoService.swift
+[7/22] Compiling StageLinqKit ByteIO.swift
+[8/22] Compiling StageLinqKit Models.swift
+[9/22] Compiling StageLinqKit NetworkDevice.swift
+[10/22] Compiling StageLinqKit DJLinkProtocol.swift
+[11/22] Compiling StageLinqKit StageLinqManager.swift
+[12/22] Compiling StageLinqKit StateMapService.swift
+[13/22] Compiling StageLinqKit StatePaths.swift
+[14/22] Compiling StageLinqKit StateValue.swift
+[15/22] Compiling StageLinqKit NetworkInfo.swift
+[16/22] Compiling StageLinqKit ProDJLinkManager.swift
+[17/22] Compiling StageLinqKit Protocol.swift
+[18/22] Compiling StageLinqKit ServiceConnection.swift
+[19/22] Compiling StageLinqKit Sockets.swift
 [20/28] Emitting module SC6000ConnectApp
-[21/28] Compiling SC6000ConnectApp CDJStripView.swift
-[22/28] Compiling SC6000ConnectApp ContentView.swift
-[23/28] Compiling SC6000ConnectApp DeckCardView.swift
-[24/28] Compiling SC6000ConnectApp LogView.swift
-[25/28] Compiling SC6000ConnectApp SC6000ConnectApp.swift
-[26/30] Compiling SC6000ConnectApp SidebarView.swift
-[27/30] Compiling SC6000ConnectApp Theme.swift
+[21/30] Compiling SC6000ConnectApp SidebarView.swift
+[22/30] Compiling SC6000ConnectApp Theme.swift
+[23/30] Compiling SC6000ConnectApp LogView.swift
+[24/30] Compiling SC6000ConnectApp SC6000ConnectApp.swift
+[25/30] Compiling SC6000ConnectApp CDJStripView.swift
+[26/30] Compiling SC6000ConnectApp ContentView.swift
+[27/30] Compiling SC6000ConnectApp DeckCardView.swift
 [27/30] Write Objects.LinkFileList
 [28/30] Linking SC6000ConnectApp
 [29/30] Applying SC6000ConnectApp
-Build complete! (13.26s)
+Build complete! (11.68s)
 === RELEASE ===
 Building for production...
 [0/5] Write sources
@@ -39,6 +39,6 @@ Building for production...
 [5/7] Compiling SC6000ConnectApp CDJStripView.swift
 [5/7] Write Objects.LinkFileList
 [6/7] Linking SC6000ConnectApp
-Build complete! (9.01s)
+Build complete! (10.64s)
 
-=== resultado: build=success release=success sha=7e77edf7d331d0e328d6b4e2d3a76e8da7414616 ===
+=== resultado: build=success release=success sha=b799cc4a8741e54474f22cae73923d4b38d4fe22 ===
