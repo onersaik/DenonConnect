@@ -34,6 +34,9 @@ struct ContentView: View {
                     EmptyStateView()
                 }
 
+                Divider().background(Theme.panelBorder)
+                CDJStripView()
+
                 if showLog {
                     Divider().background(Theme.panelBorder)
                     LogView()
