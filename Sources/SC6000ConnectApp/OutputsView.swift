@@ -277,6 +277,24 @@ struct OutputsView: View {
                                 .labelsHidden()
                                 Spacer()
                             }
+                            HStack {
+                                Text("TC / Frame rate")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(Theme.textSecondary)
+                                    .frame(width: 110, alignment: .leading)
+                                Picker("", selection: Binding(
+                                    get: { outputs.ltcDeckFrameRates[slot.id] ?? outputs.ltcFrameRate },
+                                    set: { outputs.setDeckFrameRate(slot.id, rate: $0) }
+                                )) {
+                                    ForEach(LTCGenerator.FrameRate.allCases, id: \.self) { r in
+                                        Text(r.label).tag(r)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+                                .frame(width: 210)
+                                .labelsHidden()
+                                Spacer()
+                            }
                             if let err = outputs.ltcDeckError[slot.id], !err.isEmpty {
                                 Text(err)
                                     .font(.system(size: 10))

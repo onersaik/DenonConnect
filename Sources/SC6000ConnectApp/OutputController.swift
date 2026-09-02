@@ -69,6 +69,7 @@ final class OutputController: ObservableObject {
     @Published var ltcDeckDeviceID: [String: AudioDeviceID] = [:]
     @Published var ltcDeckTimecode: [String: String] = [:]
     @Published var ltcDeckError: [String: String] = [:]
+    @Published var ltcDeckFrameRates: [String: LTCGenerator.FrameRate] = [:]
     @Published var ltcDeviceWarning: String = ""
 
     // MARK: MIDI Timecode (MTC)
@@ -318,12 +319,14 @@ final class OutputController: ObservableObject {
         let snap = snapshotForDeckID(key) ?? snapshotForDeckID(id)
         do {
             let label = ltcDeckSlots.first { Self.sameDeckID($0.id, key) }?.label ?? key
+            let deckRate = ltcDeckFrameRates[key] ?? ltcFrameRate
             let gen = makeGenerator(name: label, deviceID: deviceID, snap: snap)
+            gen.frameRate = deckRate
             try gen.start()
             applyPlayhead(gen, snap)
             deckLTC[key] = gen
             ltcDeckEnabled[key] = true
-            ltcDeckTimecode[key] = Self.timecode(snap, fps: ltcFrameRate)
+            ltcDeckTimecode[key] = Self.timecode(snap, fps: deckRate)
             refreshDeviceWarning()
             logSink?("[SMPTE] Deck ON \(label)")
         } catch {
@@ -362,6 +365,14 @@ final class OutputController: ObservableObject {
             startDeckLTC(key)
         } else {
             refreshDeviceWarning()
+        }
+    }
+
+    func setDeckFrameRate(_ id: String, rate: LTCGenerator.FrameRate) {
+        let key = generatorKey(for: id)
+        ltcDeckFrameRates[key] = rate
+        if isDeckLTCEnabled(key) {
+            startDeckLTC(key)  // restart with new rate
         }
     }
 
@@ -475,7 +486,7 @@ final class OutputController: ObservableObject {
             guard gen.isRunning else { continue }
             let snap = snapshotForDeckID(key)
             applyPlayhead(gen, snap)
-            ltcDeckTimecode[key] = Self.timecode(snap, fps: ltcFrameRate)
+            ltcDeckTimecode[key] = Self.timecode(snap, fps: ltcDeckFrameRates[key] ?? ltcFrameRate)
         }
 
         if mtcEnabled, let mtc {

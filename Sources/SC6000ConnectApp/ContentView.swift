@@ -424,7 +424,8 @@ struct DenonDeckRow: View {
             isLTCSource: outputs.isRowLTCLit(ltcID),
             isHot: outputs.isWaveformHot(ltcID),
             ltcAutoFollow: outputs.ltcAutoFollow,
-            onSelectLTC: { outputs.toggleRowLTC(ltcID) }
+            onSelectLTC: { outputs.toggleRowLTC(ltcID) },
+            onPinMaster: { outputs.pinMaster(to: ltcID) }
         )
     }
 }
@@ -442,7 +443,8 @@ struct PioneerDeckRow: View {
             isLTCSource: outputs.isRowLTCLit(display.id),
             isHot: outputs.isWaveformHot(display.id),
             ltcAutoFollow: outputs.ltcAutoFollow,
-            onSelectLTC: { outputs.toggleRowLTC(display.id) }
+            onSelectLTC: { outputs.toggleRowLTC(display.id) },
+            onPinMaster: { outputs.pinMaster(to: display.id) }
         )
     }
 }
@@ -464,7 +466,8 @@ struct PioneerTestRow: View {
             isLTCSource: outputs.isRowLTCLit(display.id),
             isHot: outputs.isWaveformHot(display.id),
             ltcAutoFollow: outputs.ltcAutoFollow,
-            onSelectLTC: { outputs.toggleRowLTC(display.id) }
+            onSelectLTC: { outputs.toggleRowLTC(display.id) },
+            onPinMaster: { outputs.pinMaster(to: display.id) }
         )
     }
 }
@@ -484,7 +487,8 @@ struct DenonTestRow: View {
             isLTCSource: outputs.isRowLTCLit(display.id),
             isHot: outputs.isWaveformHot(display.id),
             ltcAutoFollow: outputs.ltcAutoFollow,
-            onSelectLTC: { outputs.toggleRowLTC(display.id) }
+            onSelectLTC: { outputs.toggleRowLTC(display.id) },
+            onPinMaster: { outputs.pinMaster(to: display.id) }
         )
     }
 }

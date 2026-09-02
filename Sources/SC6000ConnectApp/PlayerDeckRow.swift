@@ -66,6 +66,7 @@ struct PlayerDeckRow: View {
     var isHot: Bool = false
     var ltcAutoFollow: Bool = true
     var onSelectLTC: () -> Void = {}
+    var onPinMaster: () -> Void = {}
 
     var body: some View {
         Group {
@@ -280,6 +281,7 @@ struct PlayerDeckRow: View {
                     .frame(width: 28, alignment: .trailing)
             }
 
+            masterButton
             ltcButton
         }
         .padding(.horizontal, 10)
@@ -362,8 +364,8 @@ struct PlayerDeckRow: View {
                     .foregroundColor(deck.loaded ? Theme.ledGreen : Theme.ledDim)
                 beatGrid(large: false)
                 Spacer()
-                if deck.isMaster { LEDTag(text: "MST", color: Theme.accent) }
                 if isLTCSource { LEDTag(text: "LTC", color: Theme.purple) }
+                masterButton
                 ltcButton
             }
             .padding(.horizontal, 8)
@@ -407,6 +409,27 @@ struct PlayerDeckRow: View {
         .help(isLTCSource
               ? "Este deck está emitiendo LTC. Pulsa para detener este generador (no reactiva el Master auto)."
               : "Activar SMPTE LTC de esta pista en la salida asignada a esta fila.")
+    }
+
+    private var masterButton: some View {
+        Button(action: { onPinMaster() }) {
+            HStack(spacing: 3) {
+                Image(systemName: deck.isMaster ? "crown.fill" : "crown")
+                    .font(.system(size: 7))
+                Text("MST")
+                    .font(.system(size: 8, weight: .bold))
+                    .tracking(0.3)
+            }
+            .foregroundColor(deck.isMaster ? .black : Theme.accent.opacity(0.75))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(
+                Rectangle()
+                    .fill(deck.isMaster ? Theme.accent : Theme.accent.opacity(0.12))
+            )
+        }
+        .buttonStyle(.plain)
+        .help(deck.isMaster ? "Este deck es el MASTER actual." : "Fijar este deck como MASTER LTC ahora.")
     }
 
     private var titleText: String {

@@ -29,7 +29,7 @@ struct WaveformView: View {
     /// Ventana visible en segundos. CDJ ~12 s; vista 4: más zoom en el deck
     /// caliente (~8 s) y más contexto en el resto (~24 s).
     var windowSeconds: Double = 12.0
-    private let halfBars = 96
+    private let halfBars = 180
     private var totalBars: Int { halfBars * 2 + 1 }
 
     var body: some View {
@@ -184,12 +184,34 @@ struct WaveformView: View {
     }
 
     private func rgbFromPeak(_ p: Float, time t: Double) -> (Double, Double, Double) {
+        // CDJ-style spectral simulation: multi-rate oscillators create realistic
+        // bass/mid/treble sections — red drops, cyan intros, green fills.
         let a = Double(max(0, min(1, p)))
-        let spark = abs(sin(t * 18.7 + Double(trackSeed % 97) * 0.1))
+        guard a > 0.005 else { return (0, 0, 0) }
+        let s = Double(abs(trackSeed % 997) + 1)
+
+        // Bass (red) evolves at phrase level — slow, high energy during drops.
+        let bassOsc = sin(t * 0.13 + s * 0.013) * 0.42 +
+                      sin(t * 0.37 + s * 0.029) * 0.23 +
+                      sin(t * 0.89 + s * 0.007) * 0.11
+
+        // Hi (cyan) evolves faster — hi-hats, fills, synth detail.
+        let hiOsc   = sin(t * 0.47 + s * 0.019 + 2.10) * 0.38 +
+                      sin(t * 1.31 + s * 0.011 + 3.70) * 0.22 +
+                      sin(t * 3.17 + s * 0.037 + 1.20) * 0.10
+
+        // Mid (green) — chords, pads, intermediate evolution.
+        let midOsc  = sin(t * 0.23 + s * 0.023 + 4.71) * 0.35 +
+                      sin(t * 0.61 + s * 0.031 + 1.90) * 0.20
+
+        let bassChar = max(0.08, min(1.0, bassOsc + 0.72))
+        let midChar  = max(0.03, min(1.0, midOsc  + 0.62))
+        let hiChar   = max(0.03, min(1.0, hiOsc   + 0.58))
+
         return (
-            min(1, a * 1.05),
-            min(1, a * 0.72 + spark * 0.10 * a),
-            min(1, a * 0.38 + spark * 0.22 * a)
+            min(1.0, a * bassChar),
+            min(1.0, a * midChar * 0.82),
+            min(1.0, a * hiChar  * 0.68)
         )
     }
 
