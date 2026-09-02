@@ -2,8 +2,8 @@ swift-driver version: 1.90.11.1 Apple Swift version 5.10 (swiftlang-5.10.0.13 cl
 Target: arm64-apple-macosx14.0
 Building for debugging...
 [0/12] Write sources
-[0/12] Write SC6000ConnectApp-entitlement.plist
-[3/12] Write DJSimulatorApp-entitlement.plist
+[3/12] Write SC6000ConnectApp-entitlement.plist
+[4/12] Write DJSimulatorApp-entitlement.plist
 [5/12] Write swift-version-76B232A4806BA581.txt
 [7/27] Emitting module StageLinqKit
 [8/33] Compiling StageLinqKit PioneerSimulator.swift
@@ -26,23 +26,24 @@ Building for debugging...
 [25/33] Compiling StageLinqKit LTCGenerator.swift
 [26/33] Compiling StageLinqKit OSCClient.swift
 [27/33] Compiling StageLinqKit ResolumeBridge.swift
-[28/41] Emitting module DJSimulatorApp
-[29/41] Compiling DJSimulatorApp DJSimulatorApp.swift
-[29/41] Write Objects.LinkFileList
-[31/41] Compiling SC6000ConnectApp OutputsView.swift
-[32/41] Compiling SC6000ConnectApp PlayerDeckRow.swift
-[33/43] Emitting module SC6000ConnectApp
-[34/43] Compiling SC6000ConnectApp ContentView.swift
-[35/43] Compiling SC6000ConnectApp LogView.swift
-[36/43] Compiling SC6000ConnectApp OutputController.swift
-[37/43] Compiling SC6000ConnectApp SC6000ConnectApp.swift
-[38/43] Compiling SC6000ConnectApp Theme.swift
-[38/43] Write Objects.LinkFileList
-[39/43] Linking DJSimulatorApp
-[40/43] Applying DJSimulatorApp
-[41/43] Linking SC6000ConnectApp
-[42/43] Applying SC6000ConnectApp
-Build complete! (10.28s)
+[28/42] Emitting module SC6000ConnectApp
+[29/44] Compiling SC6000ConnectApp Theme.swift
+[30/44] Compiling SC6000ConnectApp WaveformView.swift
+[31/44] Emitting module DJSimulatorApp
+[32/44] Compiling DJSimulatorApp DJSimulatorApp.swift
+[32/44] Write Objects.LinkFileList
+[34/44] Compiling SC6000ConnectApp ContentView.swift
+[35/44] Compiling SC6000ConnectApp LogView.swift
+[36/44] Compiling SC6000ConnectApp OutputController.swift
+[37/44] Compiling SC6000ConnectApp OutputsView.swift
+[38/44] Compiling SC6000ConnectApp PlayerDeckRow.swift
+[39/44] Compiling SC6000ConnectApp SC6000ConnectApp.swift
+[39/44] Write Objects.LinkFileList
+[40/44] Linking DJSimulatorApp
+[41/44] Linking SC6000ConnectApp
+[42/44] Applying DJSimulatorApp
+[43/44] Applying SC6000ConnectApp
+Build complete! (10.59s)
 === RELEASE ===
 Building for production...
 [0/8] Write sources
@@ -54,6 +55,6 @@ Building for production...
 [9/11] Compiling SC6000ConnectApp ContentView.swift
 [9/11] Write Objects.LinkFileList
 [10/11] Linking SC6000ConnectApp
-Build complete! (9.58s)
+Build complete! (9.46s)
 
-=== resultado: build=success release=success sha=4145ea52d19620d72236d76099335bf15c7f1330 ===
+=== resultado: build=success release=success sha=3452325cada11926bcafe78253c6f1fbcc7b727d ===
