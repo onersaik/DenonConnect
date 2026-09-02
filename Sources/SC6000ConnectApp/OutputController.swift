@@ -20,6 +20,8 @@ final class OutputController: ObservableObject {
     @Published var ltcFrameRate: LTCGenerator.FrameRate = .fps25
     @Published var ltcTimecode = "00:00:00:00"
     @Published var ltcError: String = ""
+    @Published var ltcDevices: [AudioDeviceInfo] = []
+    @Published var ltcSelectedDeviceID: AudioDeviceID = 0   // 0 = por defecto del sistema
 
     // Estado mostrado
     @Published var clockSource = "—"
@@ -37,6 +39,7 @@ final class OutputController: ObservableObject {
         self.stageLinq = stageLinq
         self.proDJLink = proDJLink
         self.logSink = { [weak stageLinq] message in stageLinq?.log(message) }
+        ltcDevices = LTCGenerator.availableOutputDevices()
 
         timer?.invalidate()
         let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
@@ -72,6 +75,10 @@ final class OutputController: ObservableObject {
         }
     }
 
+    func refreshLTCDevices() {
+        ltcDevices = LTCGenerator.availableOutputDevices()
+    }
+
     func applyResolumeSettings() {
         guard let bridge else { return }
         bridge.tempoMode = resolumeTempoMode
@@ -90,6 +97,7 @@ final class OutputController: ObservableObject {
         } else {
             let generator = LTCGenerator(log: { [weak self] in self?.logSink?($0) })
             generator.frameRate = ltcFrameRate
+            generator.outputDeviceID = ltcSelectedDeviceID == 0 ? nil : ltcSelectedDeviceID
             do {
                 try generator.start()
                 ltc = generator

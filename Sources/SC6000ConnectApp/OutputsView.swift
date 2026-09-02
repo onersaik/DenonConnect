@@ -126,23 +126,57 @@ struct OutputsView: View {
                 .foregroundColor(Theme.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
 
+            // Timecode grande
             Text(outputs.ltcTimecode)
                 .font(.system(size: 26, weight: .bold, design: .monospaced))
                 .foregroundColor(outputs.ltcEnabled ? Theme.ledGreen : Theme.textTertiary.opacity(0.5))
 
-            Picker("Frame rate", selection: $outputs.ltcFrameRate) {
-                ForEach(LTCGenerator.FrameRate.allCases, id: \.self) { rate in
-                    Text(rate.label).tag(rate)
+            // Frame rate
+            HStack(spacing: 8) {
+                Text("Frame rate")
+                    .font(.system(size: 10))
+                    .foregroundColor(Theme.textTertiary)
+                Picker("", selection: $outputs.ltcFrameRate) {
+                    ForEach(LTCGenerator.FrameRate.allCases, id: \.self) { rate in
+                        Text(rate.label).tag(rate)
+                    }
                 }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .disabled(outputs.ltcEnabled)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .disabled(outputs.ltcEnabled)
 
-            Text("Sale por el dispositivo de salida por defecto del Mac. Para enviarlo a otra app instala un cable de audio virtual (BlackHole o Loopback) y ponlo como salida por defecto; para enviarlo a otra máquina, usa una salida física.")
-                .font(.system(size: 10))
-                .foregroundColor(Theme.textTertiary)
-                .fixedSize(horizontal: false, vertical: true)
+            // Selector de dispositivo de salida
+            VStack(alignment: .leading, spacing: 4) {
+                Text("CANAL DE SALIDA")
+                    .font(.system(size: 9, weight: .bold))
+                    .tracking(0.6)
+                    .foregroundColor(Theme.textTertiary)
+
+                Picker("", selection: $outputs.ltcSelectedDeviceID) {
+                    ForEach(outputs.ltcDevices) { device in
+                        HStack(spacing: 5) {
+                            if device.isDefault && device.id == 0 {
+                                Image(systemName: "speaker.wave.2")
+                                    .font(.system(size: 9))
+                            } else if device.isDefault {
+                                Image(systemName: "star.fill")
+                                    .font(.system(size: 9))
+                            }
+                            Text(device.name)
+                        }
+                        .tag(device.id)
+                    }
+                }
+                .pickerStyle(.menu)
+                .disabled(outputs.ltcEnabled)
+                .font(.system(size: 11))
+
+                Text("BlackHole o Loopback para enviar a otra app; salida física para otra máquina. ★ = por defecto del sistema.")
+                    .font(.system(size: 10))
+                    .foregroundColor(Theme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             if !outputs.ltcError.isEmpty {
                 Text(outputs.ltcError)
@@ -150,10 +184,18 @@ struct OutputsView: View {
                     .foregroundColor(Theme.red)
             }
 
-            ActionButton(title: outputs.ltcEnabled ? "DETENER" : "ACTIVAR",
-                         active: outputs.ltcEnabled,
-                         color: Theme.cyan) {
-                outputs.toggleLTC()
+            HStack(spacing: 8) {
+                ActionButton(title: outputs.ltcEnabled ? "DETENER" : "ACTIVAR",
+                             active: outputs.ltcEnabled,
+                             color: Theme.cyan) {
+                    outputs.toggleLTC()
+                }
+                // Refrescar lista de dispositivos si se conecta algo nuevo
+                if !outputs.ltcEnabled {
+                    Button("↻ Actualizar") { outputs.refreshLTCDevices() }
+                        .font(.system(size: 11))
+                        .foregroundColor(Theme.textSecondary)
+                }
             }
         }
         .padding(14)
