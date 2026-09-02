@@ -1,19 +1,19 @@
 // PlayerDeckRow.swift
-// Fila estilo reproductor: dígitos LED de tiempo, BPM grande, key, rejilla de
-// beats en vivo y barra de posición. Es la vista común para decks Denon
-// (StageLinq) y Pioneer (Pro DJ Link), para que el modo Dual pueda apilar
-// 2, 4 o más decks con la misma pinta.
+// Fila estilo ShowKontrol: waveform scrolling, dígitos LED con milisegundos,
+// BPM grande, beat 1-4, key, pitch %, barra de posición, tags MASTER/ON AIR/SYNC.
+// Vista común para Denon (StageLinq) y Pioneer (Pro DJ Link).
 
 import SwiftUI
 import StageLinqKit
 
-/// Datos ya normalizados de un deck, vengan del protocolo que vengan.
+// MARK: - Modelo normalizado
+
 struct DeckDisplay: Identifiable {
     enum Source { case denon, pioneer }
 
     let id: String
     let source: Source
-    let label: String          // "SC6000 · DECK 1A", "CDJ · PLAYER 2"
+    let label: String           // "SC6000 · DECK 1A", "CDJ-3000 · PLAYER 2"
     let title: String
     let artist: String
     let key: String
@@ -25,165 +25,227 @@ struct DeckDisplay: Identifiable {
     let isSynced: Bool
     let loaded: Bool
     let stateLabel: String
-    let beatInBar: Int
+    let beatInBar: Int          // 1-4
     let beatPulse: Bool
-    let elapsed: Double?       // segundos; nil si el protocolo no lo da
+    let elapsed: Double?        // segundos + fracción
     let trackLength: Double?
-    let progress: Double?      // 0…1; nil si no hay dato fiable
+    let progress: Double?       // 0…1
     let accent: Color
+
+    // Semilla determinista para el waveform (mismo track = misma forma)
+    var trackSeed: Int {
+        var h = 0
+        for c in title.unicodeScalars { h = h &* 31 &+ Int(c.value) }
+        return abs(h)
+    }
 }
+
+// MARK: - Fila principal
 
 struct PlayerDeckRow: View {
     let deck: DeckDisplay
 
     var body: some View {
-        HStack(spacing: 14) {
-            statusColumn
-            trackColumn
-            Spacer(minLength: 8)
-            beatGrid
-            timeColumn
-            bpmColumn
+        VStack(spacing: 0) {
+            topBar
+            trackInfo
+            WaveformView(
+                progress:    deck.progress ?? 0,
+                trackLength: deck.trackLength,
+                bpm:         deck.bpm,
+                beatInBar:   deck.beatInBar,
+                isPlaying:   deck.isPlaying,
+                accent:      deck.accent,
+                trackSeed:   deck.trackSeed
+            )
+            .padding(.horizontal, 14)
+            .padding(.vertical, 6)
+            .opacity(deck.loaded ? 1 : 0.35)
+            bottomBar
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
         .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.black.opacity(0.55))
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.black.opacity(0.60))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(deck.isPlaying ? deck.accent.opacity(0.5) : Color.white.opacity(0.07),
-                        lineWidth: deck.isPlaying ? 1.5 : 1)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(
+                    deck.isPlaying ? deck.accent.opacity(0.55) : Color.white.opacity(0.07),
+                    lineWidth: deck.isPlaying ? 1.5 : 1
+                )
         )
     }
 
-    // MARK: Columna de estado
+    // MARK: Barra superior: etiqueta + tags + BPM + tiempo
 
-    private var statusColumn: some View {
-        VStack(alignment: .leading, spacing: 4) {
+    private var topBar: some View {
+        HStack(spacing: 10) {
+            // ● indicador + nombre del deck
             HStack(spacing: 5) {
                 Circle()
-                    .fill(deck.isPlaying ? deck.accent : Theme.textTertiary.opacity(0.4))
+                    .fill(deck.isPlaying ? deck.accent : Theme.textTertiary.opacity(0.35))
                     .frame(width: 7, height: 7)
-                Text(deck.label)
+                Text(deck.label.uppercased())
                     .font(.system(size: 9, weight: .bold))
                     .tracking(0.6)
                     .foregroundColor(Theme.textSecondary)
             }
-            HStack(spacing: 4) {
-                if deck.isMaster { LEDTag(text: "MASTER", color: Theme.accent) }
-                if deck.isOnAir { LEDTag(text: "ON AIR", color: Theme.red) }
-                if deck.isSynced { LEDTag(text: "SYNC", color: Theme.cyan) }
-            }
-        }
-        .frame(width: 130, alignment: .leading)
-    }
 
-    // MARK: Pista
+            // Tags MASTER / ON AIR / SYNC
+            if deck.isMaster { LEDTag(text: "MASTER", color: Theme.accent) }
+            if deck.isOnAir  { LEDTag(text: "ON AIR", color: Theme.red) }
+            if deck.isSynced { LEDTag(text: "SYNC",   color: Theme.cyan) }
 
-    private var trackColumn: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(deck.loaded ? (deck.title.isEmpty ? "—" : deck.title) : "SIN PISTA")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(deck.loaded ? Theme.ledGreen : Theme.textTertiary)
-                .lineLimit(1)
+            Spacer()
 
-            HStack(spacing: 8) {
-                if !deck.artist.isEmpty {
-                    Text(deck.artist)
-                        .font(.system(size: 11))
-                        .foregroundColor(Theme.textSecondary)
-                        .lineLimit(1)
-                }
-                if !deck.key.isEmpty {
-                    Text(deck.key)
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundColor(Theme.purple)
-                }
-                Text(deck.stateLabel.uppercased())
-                    .font(.system(size: 9, weight: .medium))
+            // BPM grande a la derecha
+            HStack(alignment: .lastTextBaseline, spacing: 4) {
+                Text(deck.bpm > 0 ? String(format: "%.2f", deck.bpm) : "---.--")
+                    .font(.system(size: 22, weight: .bold, design: .monospaced))
+                    .foregroundColor(deck.bpm > 0 ? Theme.ledGreen : Theme.textTertiary.opacity(0.45))
+                Text("BPM")
+                    .font(.system(size: 9, weight: .bold))
                     .foregroundColor(Theme.textTertiary)
             }
 
+            // Pitch %
+            if let pitch = deck.pitchPercent {
+                Text(String(format: "%+.2f%%", pitch))
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(abs(pitch) > 0.01 ? Theme.cyan : Theme.textTertiary)
+                    .frame(width: 64, alignment: .trailing)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 10)
+        .padding(.bottom, 6)
+    }
+
+    // MARK: Título + artista + tiempo LED
+
+    private var trackInfo: some View {
+        HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(deck.loaded ? (deck.title.isEmpty ? "—" : deck.title) : "SIN PISTA")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(deck.loaded ? Theme.ledGreen : Theme.textTertiary)
+                    .lineLimit(1)
+
+                HStack(spacing: 8) {
+                    if !deck.artist.isEmpty {
+                        Text(deck.artist)
+                            .font(.system(size: 11))
+                            .foregroundColor(Theme.textSecondary)
+                            .lineLimit(1)
+                    }
+                    if !deck.key.isEmpty {
+                        Text(deck.key)
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(Theme.purple)
+                    }
+                    Text(deck.stateLabel.uppercased())
+                        .font(.system(size: 9))
+                        .foregroundColor(Theme.textTertiary)
+                }
+            }
+
+            Spacer()
+
+            // Columna de tiempos con milisegundos
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(formatMS(deck.elapsed))
+                    .font(.system(size: 20, weight: .bold, design: .monospaced))
+                    .foregroundColor(deck.loaded ? Theme.ledGreen : Theme.textTertiary.opacity(0.45))
+
+                Text(remainingText)
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundColor(Theme.textTertiary)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.bottom, 4)
+    }
+
+    // MARK: Barra inferior: beat grid + key + barra progreso
+
+    private var bottomBar: some View {
+        HStack(spacing: 10) {
+            // Rejilla de beats 1-4
+            beatGrid
+
+            if !deck.key.isEmpty {
+                Text(deck.key)
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(Theme.purple)
+            }
+
+            Spacer()
+
+            // Barra de progreso
             if let progress = deck.progress {
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         Capsule().fill(Color.white.opacity(0.07))
                         Capsule()
-                            .fill(deck.accent)
-                            .frame(width: max(2, geo.size.width * progress))
+                            .fill(
+                                LinearGradient(
+                                    colors: [deck.accent.opacity(0.7), deck.accent],
+                                    startPoint: .leading, endPoint: .trailing
+                                )
+                            )
+                            .frame(width: max(4, geo.size.width * progress))
                     }
                 }
-                .frame(height: 4)
+                .frame(width: 160, height: 5)
+
+                Text(String(format: "%.0f%%", (deck.progress ?? 0) * 100))
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(Theme.textTertiary)
+                    .frame(width: 28, alignment: .trailing)
             }
         }
-        .frame(minWidth: 200, alignment: .leading)
+        .padding(.horizontal, 14)
+        .padding(.bottom, 10)
+        .padding(.top, 4)
     }
 
-    // MARK: Rejilla de beats (dato real de red, no una onda inventada)
+    // MARK: Beat grid
 
     private var beatGrid: some View {
         HStack(spacing: 3) {
-            ForEach(1...4, id: \.self) { position in
+            ForEach(1...4, id: \.self) { pos in
                 RoundedRectangle(cornerRadius: 2)
-                    .fill(color(forBeat: position))
-                    .frame(width: position == 1 ? 8 : 5, height: 16)
+                    .fill(beatColor(pos))
+                    .frame(width: pos == 1 ? 9 : 6, height: 18)
             }
         }
-        .opacity(deck.isPlaying ? 1 : 0.35)
+        .opacity(deck.isPlaying ? 1 : 0.30)
     }
 
-    private func color(forBeat position: Int) -> Color {
-        guard deck.beatInBar == position else { return Color.white.opacity(0.10) }
-        return position == 1 ? Theme.accent : deck.accent
+    private func beatColor(_ pos: Int) -> Color {
+        guard deck.beatInBar == pos else { return Color.white.opacity(0.10) }
+        return pos == 1 ? Theme.accent : deck.accent
     }
 
-    // MARK: Tiempo en dígitos LED
+    // MARK: Formateo de tiempo con milisegundos (MM:SS.mm)
 
-    private var timeColumn: some View {
-        VStack(alignment: .trailing, spacing: 2) {
-            Text(format(deck.elapsed))
-                .font(.system(size: 22, weight: .bold, design: .monospaced))
-                .foregroundColor(deck.loaded ? Theme.ledGreen : Theme.textTertiary.opacity(0.5))
-            Text(remainingText)
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
-                .foregroundColor(Theme.textTertiary)
-        }
-        .frame(width: 96, alignment: .trailing)
+    private func formatMS(_ seconds: Double?) -> String {
+        guard let s = seconds, s.isFinite, s >= 0 else { return "--:--.--" }
+        let totalMs  = Int(s * 100)       // centésimas
+        let cs       = totalMs % 100
+        let totalSec = totalMs / 100
+        let secs     = totalSec % 60
+        let mins     = totalSec / 60
+        return String(format: "%02d:%02d.%02d", mins, secs, cs)
     }
 
     private var remainingText: String {
-        guard let elapsed = deck.elapsed, let length = deck.trackLength, length > 0 else { return "--:--" }
-        return "-" + format(max(length - elapsed, 0))
-    }
-
-    private func format(_ seconds: Double?) -> String {
-        guard let seconds, seconds.isFinite, seconds >= 0 else { return "--:--" }
-        let total = Int(seconds)
-        return String(format: "%02d:%02d", total / 60, total % 60)
-    }
-
-    // MARK: BPM
-
-    private var bpmColumn: some View {
-        VStack(alignment: .trailing, spacing: 1) {
-            Text(deck.bpm > 0 ? String(format: "%.2f", deck.bpm) : "---.--")
-                .font(.system(size: 20, weight: .bold, design: .monospaced))
-                .foregroundColor(deck.bpm > 0 ? Theme.ledGreen : Theme.textTertiary.opacity(0.5))
-            if let pitch = deck.pitchPercent {
-                Text(String(format: "%+.2f%%", pitch))
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundColor(Theme.textTertiary)
-            } else {
-                Text("BPM")
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundColor(Theme.textTertiary)
-            }
-        }
-        .frame(width: 84, alignment: .trailing)
+        guard let e = deck.elapsed, let l = deck.trackLength, l > 0 else { return "--:--.--" }
+        return "-" + formatMS(max(l - e, 0))
     }
 }
+
+// MARK: - Componentes compartidos
 
 struct LEDTag: View {
     let text: String
