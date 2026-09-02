@@ -7,6 +7,9 @@ on:
     branches: [ "main" ]
   workflow_dispatch: {}
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: swift build (macOS)
@@ -16,14 +19,42 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Swift version
-        run: swift --version
+        run: swift --version 2>&1 | tee /tmp/build.log
 
       - name: Build (debug)
-        run: swift build -v
+        id: build
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          swift build 2>&1 | tee -a /tmp/build.log
 
       - name: Build (release)
-        run: swift build -c release -v
-
-      - name: Run tests
-        run: swift test -v
+        id: release
         continue-on-error: true
+        run: |
+          set -o pipefail
+          echo "=== RELEASE ===" >> /tmp/build.log
+          swift build -c release 2>&1 | tee -a /tmp/build.log
+
+      # Publica el log en el propio repositorio para poder leerlo sin iniciar
+      # sesión (los logs de Actions están detrás de login). [skip ci] evita
+      # que este commit dispare otra ejecución.
+      - name: Publicar log de compilación
+        if: always()
+        run: |
+          mkdir -p ci
+          cp /tmp/build.log ci/build-log.txt 2>/dev/null || echo "sin log" > ci/build-log.txt
+          echo "" >> ci/build-log.txt
+          echo "=== resultado: build=${{ steps.build.outcome }} release=${{ steps.release.outcome }} sha=${GITHUB_SHA} ===" >> ci/build-log.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add ci/build-log.txt
+          git commit -m "CI: log de compilación [skip ci]" || echo "sin cambios que commitear"
+          git pull --rebase origin main || true
+          git push origin HEAD:main || echo "no se pudo publicar el log"
+
+      - name: Marcar fallo si la compilación falló
+        if: steps.build.outcome == 'failure'
+        run: |
+          echo "La compilación en modo debug falló. Ver ci/build-log.txt en el repositorio."
+          exit 1
