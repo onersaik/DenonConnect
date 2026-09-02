@@ -49,6 +49,10 @@ public final class UDPSocket {
         #endif
         var broadcastEnable: Int32 = 1
         setsockopt(fd, SOL_SOCKET, SO_BROADCAST, &broadcastEnable, socklen_t(MemoryLayout<Int32>.size))
+        // Waveform RGB en TestLink ~45 KB; el default de recvfrom era 8 KB y recortaba el JSON.
+        var bufBytes: Int32 = 256 * 1024
+        setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &bufBytes, socklen_t(MemoryLayout<Int32>.size))
+        setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &bufBytes, socklen_t(MemoryLayout<Int32>.size))
 
         if let port = listenPort {
             var addr = sockaddr_in()
@@ -91,7 +95,7 @@ public final class UDPSocket {
 
     /// Recibe un datagrama. Devuelve nil si expira el timeout (para poder revisar cancelación).
     public func receive() -> (data: Data, fromIP: String)? {
-        var buf = [UInt8](repeating: 0, count: 8192)
+        var buf = [UInt8](repeating: 0, count: 65536)
         var fromAddr = sockaddr_in()
         var fromLen = socklen_t(MemoryLayout<sockaddr_in>.size)
 

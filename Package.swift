@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "SC6000Connect",
-    platforms: [.macOS(.v13)],
+    platforms: [.macOS(.v13), .iOS(.v17)],
     targets: [
         .target(
             name: "StageLinqKit",

@@ -10,6 +10,7 @@ import StageLinqKit
 
 struct OutputsView: View {
     @EnvironmentObject var outputs: OutputController
+    @EnvironmentObject var license: LicenseStore
     @Environment(\.presentationMode) private var presentation
 
     @State private var section: SettingsSection = .ltc
@@ -21,6 +22,7 @@ struct OutputsView: View {
         case osc     = "OSC"
         case web     = "Web"
         case history = "Historial"
+        case license = "Licencia"
 
         var icon: String {
             switch self {
@@ -29,6 +31,7 @@ struct OutputsView: View {
             case .osc:     return "wifi"
             case .web:     return "globe"
             case .history: return "clock.arrow.circlepath"
+            case .license: return "key.fill"
             }
         }
     }
@@ -144,6 +147,7 @@ struct OutputsView: View {
                 case .osc:     oscSection
                 case .web:     webSection
                 case .history: historySection
+                case .license: licenseSection
                 }
             }
             .padding(22)
@@ -547,6 +551,40 @@ struct OutputsView: View {
                         .padding(.vertical, 2)
                     }
                 }
+            }
+        }
+    }
+
+    // MARK: Licencia
+
+    private var licenseSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            sectionHeader(icon: "key.fill", title: "Licencia",
+                          subtitle: "Activa la app con una clave mensual o vitalicia. Puedes quitarla en cualquier momento; al hacerlo se pide de nuevo al abrir. Las claves no se muestran aquí.")
+
+            settingsPanel {
+                labelRow(label: "Estado") {
+                    Text(license.statusText)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(license.isUnlocked ? Theme.ledGreen : Theme.red)
+                }
+            }
+
+            if license.isUnlocked {
+                Button {
+                    license.deactivate()
+                    presentation.wrappedValue.dismiss()
+                } label: {
+                    Text("QUITAR LICENCIA")
+                        .font(.system(size: 11, weight: .bold))
+                        .tracking(0.6)
+                        .foregroundColor(Theme.red)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(Theme.red.opacity(0.12))
+                }
+                .buttonStyle(.plain)
+                .help("Borra la clave de este Mac. La próxima vez que abras la app pedirá activación.")
             }
         }
     }

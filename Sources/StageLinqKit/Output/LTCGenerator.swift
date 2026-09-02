@@ -94,7 +94,7 @@ public final class LTCGenerator {
     /// opción "por defecto del sistema" en primer lugar.
     public static func availableOutputDevices() -> [AudioDeviceInfo] {
         var result: [AudioDeviceInfo] = [.systemDefault]
-
+        #if os(macOS)
         // Obtener lista de todos los objetos de audio
         var propAddr = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDevices,
@@ -156,6 +156,7 @@ public final class LTCGenerator {
                 isDefault: deviceID == defaultID
             ))
         }
+        #endif
         return result
     }
 
@@ -305,6 +306,7 @@ public final class LTCGenerator {
     // MARK: Selección de dispositivo CoreAudio
 
     private func setOutputDevice(_ deviceID: AudioDeviceID) throws {
+        #if os(macOS)
         guard let audioUnit = engine.outputNode.audioUnit else { return }
         var id = deviceID
         let status = AudioUnitSetProperty(
@@ -318,6 +320,7 @@ public final class LTCGenerator {
         if status != noErr {
             throw LTCError.deviceNotFound
         }
+        #endif
     }
 
     // MARK: Render de audio

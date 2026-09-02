@@ -32,7 +32,20 @@ public final class DeckState: ObservableObject, Identifiable {
     @Published public var trackLength: Double = 0 // segundos
     @Published public var volume: Double = 0
     @Published public var isMaster: Bool = false
+    @Published public var scratchTouch: Bool = false
     @Published public var lastUpdate: Date = .distantPast
+    /// Marca de paquete (StateMap + BeatInfo). No @Published para no saturar SwiftUI.
+    public var lastPacketAt: Date = .distantPast
+    /// Pulso limitado (~4 Hz) para el LED RX.
+    @Published public var activityTick: UInt8 = 0
+    var lastActivityPublish: Date = .distantPast
+
+    public func pulseActivityIfNeeded() {
+        let now = Date()
+        guard now.timeIntervalSince(lastActivityPublish) >= 0.22 else { return }
+        lastActivityPublish = now
+        activityTick &+= 1
+    }
 
     // Beat en vivo (servicio BeatInfo)
     @Published public var currentBeat: Double = 0

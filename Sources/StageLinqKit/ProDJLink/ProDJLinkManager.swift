@@ -33,7 +33,15 @@ public final class ProDJLinkDevice: ObservableObject, Identifiable {
     @Published public var trackTitle:  String = ""
     @Published public var trackArtist: String = ""
     @Published public var trackKey:    String = ""
+    @Published public var trackGenre:  String = ""
+    @Published public var trackAlbum:  String = ""
+    @Published public var trackComment: String = ""
     @Published public var slotLabel: String = "—"
+    /// Preview del CDJ (dbserver). Vacío = el protocolo no dio picos.
+    @Published public var peaks: [UInt8] = []
+    @Published public var peaksLow: [UInt8] = []
+    @Published public var peaksMid: [UInt8] = []
+    @Published public var peaksHigh: [UInt8] = []
 
     @Published public var trackBPM: Double = 0
     @Published public var pitchPercent: Double = 0
@@ -79,13 +87,23 @@ public final class ProDJLinkDevice: ObservableObject, Identifiable {
     @Published public var hasStatus: Bool = false
     /// No @Published: actualizarlo en cada paquete reventaba SwiftUI.
     public var lastSeen: Date = Date()
-    public var positionReceivedAt: Date = Date()  // No @Published — solo para interpolación
+    /// Pulso limitado (~4 Hz) para el LED RX sin redibujar a cada datagrama.
+    @Published public var activityTick: UInt8 = 0
+    var lastActivityPublish: Date = .distantPast
 
     public init(playerNumber: Int, model: String, ip: String) {
         self.id = "cdj-\(playerNumber)-\(ip)"
         self.playerNumber = playerNumber
         self.model = model
         self.ip = ip
+    }
+
+    /// Enciende el LED RX sin saturar SwiftUI (máx. ~4 veces por segundo).
+    func pulseActivityIfNeeded() {
+        let now = Date()
+        guard now.timeIntervalSince(lastActivityPublish) >= 0.22 else { return }
+        lastActivityPublish = now
+        activityTick &+= 1
     }
 }
 
@@ -104,6 +122,7 @@ public final class ProDJLinkManager: ObservableObject {
     private var stoppedFlag = false
     private var loggedIgnoreKeys: Set<String> = []
     private var metaCache: [String: DBServerMeta] = [:]
+    private var waveformCache: [String: DBServerWaveform] = [:]
 
     public init() {}
 
@@ -327,6 +346,7 @@ public final class ProDJLinkManager: ObservableObject {
         // aplicamos el UDP, la fila parpadea (MASTER, compás, waveform).
         if NetworkInfo.isLocalIPv4(ip) { return }
         DispatchQueue.main.async {
+            target.pulseActivityIfNeeded()
             if target.beatInBar != beat.beatInBar {
                 target.beatInBar = beat.beatInBar
                 target.beatPulse.toggle()
@@ -349,13 +369,10 @@ public final class ProDJLinkManager: ObservableObject {
         }
         target.lastSeen = Date()
         if NetworkInfo.isLocalIPv4(ip) { return }
-        let recvAt = Date()
         DispatchQueue.main.async {
+            target.pulseActivityIfNeeded()
             if abs(target.trackLength - pos.trackLength) > 0.01 { target.trackLength = pos.trackLength }
-            if abs(target.playhead - pos.playhead) > 0.001 {
-                target.playhead = pos.playhead
-                target.positionReceivedAt = recvAt
-            }
+            if abs(target.playhead - pos.playhead) > 0.001 { target.playhead = pos.playhead }
             if !target.hasPosition { target.hasPosition = true }
         }
     }
@@ -384,6 +401,7 @@ public final class ProDJLinkManager: ObservableObject {
         if NetworkInfo.isLocalIPv4(ip) { return }
 
         DispatchQueue.main.async {
+            target.pulseActivityIfNeeded()
             if !status.model.isEmpty, target.model != status.model { target.model = status.model }
             if target.firmware != status.firmware { target.firmware = status.firmware }
             if target.isPlaying != status.isPlaying { target.isPlaying = status.isPlaying }
@@ -403,6 +421,8 @@ public final class ProDJLinkManager: ObservableObject {
                     target.effectiveBPM = 0
                     target.beatCount = 0
                     target.trackTitle = ""; target.trackArtist = ""; target.trackKey = ""
+                    target.trackGenre = ""; target.trackAlbum = ""; target.trackComment = ""
+                    target.peaks = []; target.peaksLow = []; target.peaksMid = []; target.peaksHigh = []
                 }
             }
             if target.trackID != status.trackID {
@@ -421,6 +441,9 @@ public final class ProDJLinkManager: ObservableObject {
                                 target.trackTitle  = cached.title
                                 target.trackArtist = cached.artist
                                 target.trackKey    = cached.key
+                                target.trackGenre  = cached.genre
+                                target.trackAlbum  = cached.album
+                                target.trackComment = cached.comment
                             }
                         } else {
                             self.netQueue.async { [weak self, weak target] in
@@ -435,6 +458,34 @@ public final class ProDJLinkManager: ObservableObject {
                                     target.trackTitle  = meta.title
                                     target.trackArtist = meta.artist
                                     target.trackKey    = meta.key
+                                    target.trackGenre  = meta.genre
+                                    target.trackAlbum  = meta.album
+                                    target.trackComment = meta.comment
+                                }
+                            }
+                        }
+                        if let cachedWF = self.waveformCache[key] {
+                            DispatchQueue.main.async {
+                                guard target.trackID == newID else { return }
+                                target.peaks = cachedWF.peaks
+                                target.peaksLow = cachedWF.peaksLow
+                                target.peaksMid = cachedWF.peaksMid
+                                target.peaksHigh = cachedWF.peaksHigh
+                            }
+                        } else {
+                            self.netQueue.async { [weak self, weak target] in
+                                guard let self, let target else { return }
+                                guard let wf = DBServerClient.queryWaveform(
+                                    ip: ip, slot: slot, trackID: newID) else { return }
+                                self.bookkeepingQueue.async {
+                                    self.waveformCache[key] = wf
+                                }
+                                DispatchQueue.main.async {
+                                    guard target.trackID == newID else { return }
+                                    target.peaks = wf.peaks
+                                    target.peaksLow = wf.peaksLow
+                                    target.peaksMid = wf.peaksMid
+                                    target.peaksHigh = wf.peaksHigh
                                 }
                             }
                         }

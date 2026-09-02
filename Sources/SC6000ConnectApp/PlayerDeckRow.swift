@@ -16,6 +16,9 @@ struct DeckDisplay: Identifiable {
     let title: String
     let artist: String
     let key: String
+    let genre: String
+    let album: String
+    let comment: String
     let bpm: Double
     let pitchPercent: Double?
     let isPlaying: Bool
@@ -33,8 +36,16 @@ struct DeckDisplay: Identifiable {
     let cuePositionFraction: Double?    // 0…1 cue activo; nil = sin cue
     let loopInFraction: Double?         // 0…1
     let loopOutFraction: Double?        // 0…1
-    var peaks: [Float] = []             // waveform real (TEST); vacío = procedural
+    var peaks: [UInt8] = []             // waveform real (TEST); vacío = procedural
+    var peaksLow: [UInt8] = []
+    var peaksMid: [UInt8] = []
+    var peaksHigh: [UInt8] = []
+    var ltcTimecode: String? = nil       // TC timecode para mostrar (SMPTE / deck LTC)
     var artworkImage: NSImage? = nil
+    /// Último paquete del reproductor (jog, play, fader, StateMap…).
+    var signalAt: Date = .distantPast
+    /// Huella de controles discretos (play, cue, loop, fader, pitch…). Cambia → flash LED.
+    var controlStamp: Int = 0
 
     var trackSeed: Int {
         if !title.isEmpty {
@@ -62,11 +73,15 @@ struct DeckDisplay: Identifiable {
 struct PlayerDeckRow: View {
     let deck: DeckDisplay
     var isLarge: Bool = true
+    var isHero: Bool = false
     var isLTCSource: Bool = false
+    var isMasterFocus: Bool = false
     var isHot: Bool = false
     var ltcAutoFollow: Bool = true
     var onSelectLTC: () -> Void = {}
     var onPinMaster: () -> Void = {}
+
+    @EnvironmentObject private var artwork: ArtworkFetcher
 
     var body: some View {
         Group {
@@ -94,16 +109,20 @@ struct PlayerDeckRow: View {
                     accent:      deck.accent,
                     trackSeed:   deck.trackSeed,
                     peaks: deck.peaks,
+                    peaksLow: deck.peaksLow,
+                    peaksMid: deck.peaksMid,
+                    peaksHigh: deck.peaksHigh,
                     cuePositionFraction: deck.cuePositionFraction,
                     loopInFraction:  deck.loopInFraction,
                     loopOutFraction: deck.loopOutFraction,
                     mode: .scrolling,
-                    windowSeconds: 12
+                    windowSeconds: isHero ? 10 : 12
                 )
                 .id(deck.id)
-                .frame(height: 92)
+                .frame(height: isHero ? 148 : 96)
                 .opacity(deck.loaded && (deck.progress != nil || !deck.peaks.isEmpty) ? 1 : 0.28)
                 .transaction { $0.animation = nil }
+                if isHero, hasExtendedMeta { largeDetailRow }
                 largeBottomBar
             }
         }
@@ -138,7 +157,9 @@ struct PlayerDeckRow: View {
                 .font(.system(size: 8))
                 .foregroundColor(deck.isPlaying ? Theme.ledGreen : Theme.textTertiary)
 
-            if deck.isMaster { LEDTag(text: "MST", color: Theme.accent) }
+            DeckSignalLED(signalAt: deck.signalAt, stamp: deck.controlStamp)
+
+            if isMasterFocus || deck.isMaster { LEDTag(text: "MST", color: Theme.accent) }
             if deck.isOnAir  { LEDTag(text: "AIR", color: Theme.red) }
             if deck.isSynced { LEDTag(text: "SYNC", color: Theme.cyan) }
 
@@ -156,6 +177,8 @@ struct PlayerDeckRow: View {
 
     private var largeMetaRow: some View {
         HStack(alignment: .center, spacing: 12) {
+            artworkThumb(size: isHero ? 52 : 40)
+
             VStack(alignment: .leading, spacing: 2) {
                 Text(titleText)
                     .font(.system(size: 20, weight: .bold))
@@ -175,6 +198,12 @@ struct PlayerDeckRow: View {
                             .font(.system(size: 10, weight: .bold))
                             .foregroundColor(Theme.purple)
                     }
+                    if !deck.genre.isEmpty {
+                        Text(deck.genre)
+                            .font(.system(size: 10))
+                            .foregroundColor(Theme.cyan)
+                            .lineLimit(1)
+                    }
                     Text(deck.stateLabel.uppercased())
                         .font(.system(size: 9, weight: .semibold))
                         .tracking(0.6)
@@ -187,8 +216,11 @@ struct PlayerDeckRow: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .onAppear { artwork.fetch(artist: deck.artist, title: deck.title) }
 
             ledTimeDisplay
+
+            keyBadge(size: isHero ? 22 : 18)
 
             VStack(alignment: .trailing, spacing: 1) {
                 if let pitch = deck.pitchPercent, abs(pitch) > 0.01 {
@@ -212,14 +244,126 @@ struct PlayerDeckRow: View {
         .padding(.bottom, 4)
     }
 
-    /// MM : SS . CS en bloques con etiqueta arriba
+    private var hasExtendedMeta: Bool {
+        !deck.album.isEmpty || !deck.genre.isEmpty || !deck.key.isEmpty || !deck.comment.isEmpty
+    }
+
+    private var largeDetailRow: some View {
+        HStack(alignment: .top, spacing: 16) {
+            if !deck.album.isEmpty {
+                metaChip(label: "ÁLBUM", value: deck.album)
+            }
+            if !deck.genre.isEmpty {
+                metaChip(label: "GÉNERO", value: deck.genre)
+            }
+            if !deck.key.isEmpty {
+                metaChip(label: "NOTA", value: deck.key)
+            }
+            if !deck.comment.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("COMENTARIOS")
+                        .font(.system(size: 7, weight: .bold))
+                        .tracking(0.6)
+                        .foregroundColor(Theme.textTertiary)
+                    Text(deck.comment)
+                        .font(.system(size: 11))
+                        .foregroundColor(Theme.textSecondary)
+                        .lineLimit(3)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Theme.strip)
+    }
+
+    private func metaChip(label: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.system(size: 7, weight: .bold))
+                .tracking(0.6)
+                .foregroundColor(Theme.textTertiary)
+            Text(value)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(Theme.textPrimary)
+                .lineLimit(1)
+        }
+    }
+
+    private func artworkThumb(size: CGFloat) -> some View {
+        let img = artwork.artwork(artist: deck.artist, title: deck.title) ?? deck.artworkImage
+        return Group {
+            if let img {
+                Image(nsImage: img)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: size, height: size)
+                    .clipped()
+            } else {
+                Rectangle()
+                    .fill(Color.white.opacity(0.06))
+                    .frame(width: size, height: size)
+                    .overlay(
+                        Image(systemName: "music.note")
+                            .font(.system(size: size * 0.32))
+                            .foregroundColor(Theme.textTertiary)
+                    )
+            }
+        }
+        .overlay(Rectangle().stroke(Theme.rowDivider, lineWidth: 1))
+    }
     private var ledTimeDisplay: some View {
-        HStack(alignment: .bottom, spacing: 3) {
-            ledBlock(value: timeField(deck.elapsed, .min), label: "MIN")
-            ledSep(":")
-            ledBlock(value: timeField(deck.elapsed, .sec), label: "SEG")
-            ledSep(".")
-            ledBlock(value: timeField(deck.elapsed, .cs),  label: "CS")
+        VStack(alignment: .center, spacing: 2) {
+            HStack(alignment: .bottom, spacing: 3) {
+                ledBlock(value: timeField(deck.elapsed, .min), label: "MIN")
+                ledSep(":")
+                ledBlock(value: timeField(deck.elapsed, .sec), label: "SEG")
+                ledSep(".")
+                ledBlock(value: timeField(deck.elapsed, .cs),  label: "CS")
+            }
+            HStack(spacing: 6) {
+                Text("TC")
+                    .font(.system(size: 8, weight: .bold))
+                    .tracking(0.8)
+                    .foregroundColor(Theme.textTertiary)
+                Text(displayedTimecode)
+                    .font(.system(size: 13, weight: .bold, design: .monospaced))
+                    .foregroundColor(deck.loaded ? Theme.accent : Theme.ledDim)
+            }
+        }
+    }
+
+    private var displayedTimecode: String {
+        if let tc = deck.ltcTimecode, !tc.isEmpty, !(tc == "00:00:00:00" && (deck.elapsed ?? 0) > 0.04) {
+            return tc
+        }
+        return LTCGenerator.timecodeText(seconds: deck.elapsed ?? 0, fps: 25)
+    }
+
+    private var keyText: String {
+        deck.key.isEmpty ? "—" : deck.key
+    }
+
+    private func keyBadge(size: CGFloat) -> some View {
+        VStack(spacing: 1) {
+            Text("KEY")
+                .font(.system(size: 7, weight: .bold))
+                .tracking(0.8)
+                .foregroundColor(Theme.textTertiary)
+            Text(keyText)
+                .font(.system(size: size, weight: .bold, design: .monospaced))
+                .foregroundColor(deck.key.isEmpty ? Theme.ledDim : Theme.purple)
+                .frame(minWidth: 44)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 4)
+                .background(Color.black)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 2)
+                        .stroke(deck.key.isEmpty ? Theme.rowDivider : Theme.purple.opacity(0.45), lineWidth: 1)
+                )
         }
     }
 
@@ -252,10 +396,25 @@ struct PlayerDeckRow: View {
         HStack(spacing: 10) {
             beatGrid(large: true)
 
+            if let tc = deck.ltcTimecode {
+                Text(tc)
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundColor(Theme.accent)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(Rectangle().fill(Theme.accent.opacity(0.12)))
+            }
+
             if !deck.key.isEmpty {
                 Text(deck.key)
                     .font(.system(size: 10, weight: .bold))
                     .foregroundColor(Theme.purple)
+            }
+            if !deck.album.isEmpty {
+                Text(deck.album)
+                    .font(.system(size: 10))
+                    .foregroundColor(Theme.textSecondary)
+                    .lineLimit(1)
             }
 
             Text(remainingText)
@@ -297,13 +456,14 @@ struct PlayerDeckRow: View {
             // ── Header row ──────────────────────────────────────────────
             HStack(spacing: 0) {
                 // Deck tag strip
-                VStack(spacing: 1) {
+                VStack(spacing: 2) {
                     Text(deck.deckTag)
                         .font(.system(size: 13, weight: .bold, design: .monospaced))
                         .foregroundColor(Theme.textPrimary)
                     Image(systemName: deck.isPlaying ? "play.fill" : "pause.fill")
                         .font(.system(size: 7))
                         .foregroundColor(deck.isPlaying ? Theme.ledGreen : Theme.textTertiary)
+                    DeckSignalLED(signalAt: deck.signalAt, stamp: deck.controlStamp, compact: true)
                 }
                 .frame(width: 32)
                 .frame(maxHeight: .infinity)
@@ -347,6 +507,12 @@ struct PlayerDeckRow: View {
 
                 // Tags + action buttons
                 HStack(spacing: 4) {
+                    Text(displayedTimecode)
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .foregroundColor(Theme.accent)
+                    Text(keyText)
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundColor(deck.key.isEmpty ? Theme.textTertiary : Theme.purple)
                     if isLTCSource { LEDTag(text: "LTC", color: Theme.purple) }
                     masterButton
                     ltcButton
@@ -366,6 +532,9 @@ struct PlayerDeckRow: View {
                 accent:              deck.accent,
                 trackSeed:           deck.trackSeed,
                 peaks:               deck.peaks,
+                peaksLow:            deck.peaksLow,
+                peaksMid:            deck.peaksMid,
+                peaksHigh:           deck.peaksHigh,
                 cuePositionFraction: deck.cuePositionFraction,
                 loopInFraction:      deck.loopInFraction,
                 loopOutFraction:     deck.loopOutFraction,
@@ -419,22 +588,24 @@ struct PlayerDeckRow: View {
     private var masterButton: some View {
         Button(action: { onPinMaster() }) {
             HStack(spacing: 3) {
-                Image(systemName: isLTCSource ? "crown.fill" : "crown")
+                Image(systemName: isMasterFocus ? "crown.fill" : "crown")
                     .font(.system(size: 7))
                 Text("MST")
                     .font(.system(size: 8, weight: .bold))
                     .tracking(0.3)
             }
-            .foregroundColor(isLTCSource ? .black : Theme.accent.opacity(0.75))
+            .foregroundColor(isMasterFocus ? .black : Theme.accent.opacity(0.75))
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
             .background(
                 Rectangle()
-                    .fill(isLTCSource ? Theme.accent : Theme.accent.opacity(0.12))
+                    .fill(isMasterFocus ? Theme.accent : Theme.accent.opacity(0.12))
             )
         }
         .buttonStyle(.plain)
-        .help(isLTCSource ? "MASTER fijado a este deck. Pulsa SMPTE para cambiar canal." : "Fijar este deck como MASTER ahora.")
+        .help(isMasterFocus
+              ? "Esta es la pista MASTER en monitor. Pulsa de nuevo para seguir al que está sonando."
+              : "Mostrar esta pista en grande (vista MASTER). No activa SMPTE.")
     }
 
     private var titleText: String {
@@ -513,5 +684,49 @@ struct LEDTag: View {
             .padding(.horizontal, 4)
             .padding(.vertical, 1)
             .background(Rectangle().fill(color.opacity(0.16)))
+    }
+}
+
+/// LED de recepción tipo reproductor: vivo con cualquier paquete, flash al pulsar/jog/fader.
+struct DeckSignalLED: View {
+    let signalAt: Date
+    let stamp: Int
+    var compact: Bool = false
+
+    @State private var flashUntil: Date = .distantPast
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 0.1)) { timeline in
+            let now = timeline.date
+            let live = now.timeIntervalSince(signalAt) < 0.9
+            let flash = now < flashUntil
+            let lit = flash ? Color.white : (live ? Theme.ledGreen : Color.white.opacity(0.12))
+            VStack(spacing: compact ? 0 : 2) {
+                ZStack {
+                    Capsule()
+                        .fill(Color.black)
+                        .frame(width: compact ? 9 : 11, height: compact ? 14 : 20)
+                        .overlay(Capsule().stroke(Color.white.opacity(0.14), lineWidth: 1))
+                    Capsule()
+                        .fill(lit)
+                        .frame(width: compact ? 4 : 5, height: compact ? 8 : 12)
+                        .shadow(
+                            color: flash ? Color.white.opacity(0.95)
+                                : (live ? Theme.ledGreen.opacity(0.9) : .clear),
+                            radius: flash ? 5 : (live ? 3.5 : 0)
+                        )
+                }
+                if !compact {
+                    Text("RX")
+                        .font(.system(size: 6, weight: .bold))
+                        .tracking(0.5)
+                        .foregroundColor(flash || live ? Theme.ledGreen : Theme.textTertiary)
+                }
+            }
+        }
+        .onChange(of: stamp) { _ in
+            flashUntil = Date().addingTimeInterval(0.32)
+        }
+        .help("Señal del reproductor: jog, play, cue, loop, fader o cualquier paquete.")
     }
 }

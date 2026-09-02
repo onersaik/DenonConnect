@@ -192,13 +192,27 @@ final class OutputController: ObservableObject {
         ltcAutoFollow = (id == nil)
     }
 
-    /// Ancla el Master a esta fila (cancela auto). No toca los generadores por deck.
+    /// Fila que MST está mostrando / anclando. Independiente de SMPTE.
+    func isMasterFocus(_ id: String) -> Bool {
+        if !ltcAutoFollow, let pinned = ltcSourceDeckID {
+            return Self.sameDeckID(pinned, id)
+        }
+        if let hot = hotDeckID {
+            return Self.sameDeckID(hot, id)
+        }
+        return false
+    }
+
+    /// Ancla esta fila como MASTER de monitor (la que “está saliendo”).
+    /// No enciende SMPTE: eso es el botón SMPTE / el MASTER de la cabecera.
     func pinMaster(to id: String) {
+        if !ltcAutoFollow, let current = ltcSourceDeckID, Self.sameDeckID(current, id) {
+            setAutoFollow(true)
+            return
+        }
         ltcSourceDeckID = id
         ltcAutoFollow = false
-        if !ltcEnabled {
-            startMasterLTC()
-        } else {
+        if ltcEnabled {
             applyToMaster(snapshotForDeckID(id))
         }
     }
@@ -465,28 +479,40 @@ final class OutputController: ObservableObject {
         refreshDeckSlots()
 
         let masterSnapshot = currentSnapshot()
-        hotDeckID = masterSnapshot.sourceDeckID
+        if hotDeckID != masterSnapshot.sourceDeckID {
+            hotDeckID = masterSnapshot.sourceDeckID
+        }
 
         bridge?.send(masterSnapshot)
 
         if ltcEnabled {
             let snap = snapshotForMaster()
-            clockSource = snap.sourceLabel
-            clockBPM    = snap.bpm
+            if clockSource != snap.sourceLabel { clockSource = snap.sourceLabel }
+            if abs(clockBPM - snap.bpm) > 0.01 { clockBPM = snap.bpm }
             applyToMaster(snap)
-            ltcFollowedDeckID = snap.sourceDeckID
-            ltcTimecode = Self.timecode(snap, fps: ltcFrameRate)
+            if ltcFollowedDeckID != snap.sourceDeckID {
+                ltcFollowedDeckID = snap.sourceDeckID
+            }
+            let tc = Self.timecode(snap, fps: ltcFrameRate)
+            if ltcTimecode != tc { ltcTimecode = tc }
         } else {
-            ltcFollowedDeckID = nil
-            clockSource = masterSnapshot.sourceLabel
-            clockBPM    = masterSnapshot.bpm
+            if ltcFollowedDeckID != nil { ltcFollowedDeckID = nil }
+            if clockSource != masterSnapshot.sourceLabel {
+                clockSource = masterSnapshot.sourceLabel
+            }
+            if abs(clockBPM - masterSnapshot.bpm) > 0.01 {
+                clockBPM = masterSnapshot.bpm
+            }
         }
 
         for (key, gen) in deckLTC {
             guard gen.isRunning else { continue }
             let snap = snapshotForDeckID(key)
             applyPlayhead(gen, snap)
-            ltcDeckTimecode[key] = Self.timecode(snap, fps: ltcDeckFrameRates[key] ?? ltcFrameRate)
+            let tc = Self.timecode(snap, fps: ltcDeckFrameRates[key] ?? ltcFrameRate)
+            if ltcDeckTimecode[key] != tc {
+                ltcDeckTimecode[key] = tc
+            }
         }
 
         if mtcEnabled, let mtc {
@@ -692,6 +718,10 @@ final class OutputController: ObservableObject {
                     let name  = device.name.isEmpty ? device.ip : device.name
                     let prog  = overlay?.progress ?? deck.beatProgress
                     let elapsed: Double? = overlay?.position ?? prog.map { $0 * deck.trackLength }
+                    let deckID = overlay != nil
+                        ? DeckDisplayBuilder.testDenonID(deck.id - 1)
+                        : "denon-\(device.id)-\(deck.id)"
+                    let isLTCSrc = hotDeckID == deckID
                     result.append(DeckSnapshot(
                         label:     "SC6000 \(name) \(layer)",
                         title:     TrackNaming.cleanTitle(overlay?.title ?? deck.trackTitle),
@@ -704,7 +734,10 @@ final class OutputController: ObservableObject {
                         progress:  prog,
                         beatInBar: overlay != nil
                             ? MusicalClock.beatInBar(position: overlay?.position ?? 0, bpm: bpm)
-                            : Int(deck.currentBeat.truncatingRemainder(dividingBy: 4)) + 1
+                            : Int(deck.currentBeat.truncatingRemainder(dividingBy: 4)) + 1,
+                        key:       deck.trackKey,
+                        ltcSource: isLTCSrc,
+                        tcTimecode: ltcDeckTimecode[deckID] ?? (isLTCSrc && ltcEnabled ? ltcTimecode : nil)
                     ))
                 }
             }
@@ -736,17 +769,24 @@ final class OutputController: ObservableObject {
             for device in pdl.devices {
                 if !shouldUsePioneer(device) { continue }
                 let bpm = MusicalClock.bpm(device.effectiveBPM, device.trackBPM)
+                let pID = "pioneer-\(device.id)"
+                let pIsLTCSrc = hotDeckID == pID
                 result.append(DeckSnapshot(
                     label:     "\(device.model.isEmpty ? "CDJ" : device.model) P\(device.playerNumber)",
-                    title:     "",
-                    artist:    "",
+                    title:     device.trackTitle,
+                    artist:    device.trackArtist,
                     bpm:       bpm,
                     isPlaying: device.isPlaying,
                     isMaster:  device.isMaster,
                     elapsed:   device.hasPosition ? device.playhead : nil,
                     duration:  device.hasPosition && device.trackLength > 0 ? device.trackLength : nil,
                     progress:  device.hasPosition && device.trackLength > 0 ? device.progress : nil,
-                    beatInBar: device.beatInBar
+                    beatInBar: device.beatInBar,
+                    key:       device.trackKey,
+                    pitchPct:  device.pitchPercent,
+                    isOnAir:   device.isOnAir,
+                    ltcSource: pIsLTCSrc,
+                    tcTimecode: ltcDeckTimecode[pID] ?? (pIsLTCSrc && ltcEnabled ? ltcTimecode : nil)
                 ))
             }
         }

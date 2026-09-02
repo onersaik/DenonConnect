@@ -1,6 +1,7 @@
 // TestLink.swift
 // Canal local UDP 127.0.0.1:51341 entre STAGE CONNECT TEST y STAGE CONNECT.
-// StageLinq y Pro DJ Link no llevan waveform ni, en Pioneer, título de pista.
+// StageLinq no lleva picos de waveform. Pioneer a veces expone preview por dbserver;
+// si no hay picos, la UI pinta envolvente plana (no un senoidal inventado).
 // TEST publica título limpio, BPM, posición y picos RMS; la app principal
 // los superpone en las filas Denon/Pioneer de este Mac.
 
@@ -38,19 +39,40 @@ public enum TrackNaming {
 }
 
 public struct TestLinkDeck: Codable, Equatable, Sendable {
+    /// Columnas objetivo del waveform RGB (TEST). UDP localhost aguanta ~64 KB.
+    public static let waveformColumns = 7200
+    /// Si el JSON no cabe, se baja por max-in-bin; nunca a 300 picos.
+    public static let minWaveformColumns = 1200
+    public static let udpSafeBytes = 62000
+
     public var title: String
     public var artist: String
     public var bpm: Double
     public var playing: Bool
     public var position: Double
     public var duration: Double
+    /// Amplitud overall (legacy). STAGE CONNECT viejo ignora `bands`.
     public var peaks: [UInt8]
+    /// Graves / medios / agudos, misma longitud. Vacío = solo `peaks`.
+    public var peaksLow: [UInt8]
+    public var peaksMid: [UInt8]
+    public var peaksHigh: [UInt8]
     public var isMaster: Bool
     public var key: String
+    public var genre: String
+    public var album: String
+    public var comment: String
+
+    enum CodingKeys: String, CodingKey {
+        case title, artist, bpm, playing, position, duration, peaks, isMaster, key, genre, album, comment
+        case bands
+    }
 
     public init(title: String = "", artist: String = "", bpm: Double = 0,
                 playing: Bool = false, position: Double = 0, duration: Double = 0,
-                peaks: [UInt8] = [], isMaster: Bool = false, key: String = "") {
+                peaks: [UInt8] = [], isMaster: Bool = false, key: String = "",
+                genre: String = "", album: String = "", comment: String = "",
+                peaksLow: [UInt8] = [], peaksMid: [UInt8] = [], peaksHigh: [UInt8] = []) {
         self.title = TrackNaming.cleanTitle(title)
         self.artist = artist
         self.bpm = bpm
@@ -58,12 +80,72 @@ public struct TestLinkDeck: Codable, Equatable, Sendable {
         self.position = position
         self.duration = duration
         self.peaks = peaks
+        self.peaksLow = peaksLow
+        self.peaksMid = peaksMid
+        self.peaksHigh = peaksHigh
         self.isMaster = isMaster
         self.key = key
+        self.genre = genre
+        self.album = album
+        self.comment = comment
+        reconcileAmplitude()
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        title = TrackNaming.cleanTitle(try c.decodeIfPresent(String.self, forKey: .title) ?? "")
+        artist = try c.decodeIfPresent(String.self, forKey: .artist) ?? ""
+        bpm = try c.decodeIfPresent(Double.self, forKey: .bpm) ?? 0
+        playing = try c.decodeIfPresent(Bool.self, forKey: .playing) ?? false
+        position = try c.decodeIfPresent(Double.self, forKey: .position) ?? 0
+        duration = try c.decodeIfPresent(Double.self, forKey: .duration) ?? 0
+        peaks = try c.decodeIfPresent([UInt8].self, forKey: .peaks) ?? []
+        isMaster = try c.decodeIfPresent(Bool.self, forKey: .isMaster) ?? false
+        key = try c.decodeIfPresent(String.self, forKey: .key) ?? ""
+        genre = try c.decodeIfPresent(String.self, forKey: .genre) ?? ""
+        album = try c.decodeIfPresent(String.self, forKey: .album) ?? ""
+        comment = try c.decodeIfPresent(String.self, forKey: .comment) ?? ""
+        peaksLow = []
+        peaksMid = []
+        peaksHigh = []
+        if let packed = try c.decodeIfPresent(String.self, forKey: .bands),
+           let rgb = Self.unpackBands(packed) {
+            peaksLow = rgb.low
+            peaksMid = rgb.mid
+            peaksHigh = rgb.high
+        }
+        reconcileAmplitude()
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(title, forKey: .title)
+        try c.encode(artist, forKey: .artist)
+        try c.encode(bpm, forKey: .bpm)
+        try c.encode(playing, forKey: .playing)
+        try c.encode(position, forKey: .position)
+        try c.encode(duration, forKey: .duration)
+        if hasRGB {
+            // Peaks cortos para clientes viejos; la alta res va en `bands` (base64).
+            try c.encode(Self.quantize(peaks.map { Float($0) / 255.0 }, count: 200), forKey: .peaks)
+            try c.encode(Self.packBands(low: peaksLow, mid: peaksMid, high: peaksHigh), forKey: .bands)
+        } else {
+            try c.encode(peaks, forKey: .peaks)
+        }
+        try c.encode(isMaster, forKey: .isMaster)
+        try c.encode(key, forKey: .key)
+        try c.encode(genre, forKey: .genre)
+        try c.encode(album, forKey: .album)
+        try c.encode(comment, forKey: .comment)
     }
 
     public var peaksFloat: [Float] {
         peaks.map { Float($0) / 255.0 }
+    }
+
+    public var hasRGB: Bool {
+        let n = peaksLow.count
+        return n > 1 && peaksMid.count == n && peaksHigh.count == n
     }
 
     public var progress: Double? {
@@ -73,16 +155,90 @@ public struct TestLinkDeck: Codable, Equatable, Sendable {
 
     public var loaded: Bool { duration > 0 || !title.isEmpty }
 
-    public static func quantize(_ peaks: [Float], count: Int = 300) -> [UInt8] {
-        guard !peaks.isEmpty else { return [] }
-        if peaks.count == count {
-            return peaks.map { UInt8(min(255, max(0, Int(($0 * 255).rounded())))) }
+    public mutating func stripWaveform() {
+        peaks = []
+        peaksLow = []
+        peaksMid = []
+        peaksHigh = []
+    }
+
+    /// Baja columnas RGB por max-in-bin si el datagrama se pasa de UDP.
+    public mutating func compactBands(to count: Int) {
+        guard hasRGB, peaksLow.count > count else { return }
+        let n = max(Self.minWaveformColumns, count)
+        peaksLow = Self.quantize(peaksLow.map { Float($0) / 255.0 }, count: n)
+        peaksMid = Self.quantize(peaksMid.map { Float($0) / 255.0 }, count: n)
+        peaksHigh = Self.quantize(peaksHigh.map { Float($0) / 255.0 }, count: n)
+        reconcileAmplitude()
+    }
+
+    mutating func reconcileAmplitude() {
+        guard hasRGB else { return }
+        if peaks.count != peaksLow.count {
+            peaks = (0..<peaksLow.count).map { i in
+                max(peaksLow[i], peaksMid[i], peaksHigh[i])
+            }
         }
-        var out = [UInt8](repeating: 0, count: count)
-        for i in 0..<count {
-            let src = Int((Double(i) / Double(count)) * Double(peaks.count))
-            let v = peaks[min(peaks.count - 1, src)]
-            out[i] = UInt8(min(255, max(0, Int((v * 255).rounded()))))
+    }
+
+    public static func packBands(low: [UInt8], mid: [UInt8], high: [UInt8]) -> String {
+        let n = min(low.count, mid.count, high.count)
+        var bytes = [UInt8](repeating: 0, count: n * 3)
+        if n > 0 {
+            bytes.withUnsafeMutableBufferPointer { dst in
+                guard let base = dst.baseAddress else { return }
+                for i in 0..<n {
+                    let o = i * 3
+                    base[o] = low[i]
+                    base[o + 1] = mid[i]
+                    base[o + 2] = high[i]
+                }
+            }
+        }
+        return Data(bytes).base64EncodedString()
+    }
+
+    public static func unpackBands(_ s: String) -> (low: [UInt8], mid: [UInt8], high: [UInt8])? {
+        guard let data = Data(base64Encoded: s), data.count >= 6, data.count % 3 == 0 else { return nil }
+        let n = data.count / 3
+        var low = [UInt8](repeating: 0, count: n)
+        var mid = [UInt8](repeating: 0, count: n)
+        var high = [UInt8](repeating: 0, count: n)
+        data.withUnsafeBytes { raw in
+            guard let src = raw.bindMemory(to: UInt8.self).baseAddress else { return }
+            for i in 0..<n {
+                let o = i * 3
+                low[i] = src[o]
+                mid[i] = src[o + 1]
+                high[i] = src[o + 2]
+            }
+        }
+        return (low, mid, high)
+    }
+
+    public static func encodeU8(_ v: Float) -> UInt8 {
+        UInt8(min(255, max(0, Int((v * 255).rounded()))))
+    }
+
+    /// Max-in-bin para no perder kicks al bajar resolución.
+    public static func quantize(_ peaks: [Float], count: Int = waveformColumns) -> [UInt8] {
+        guard !peaks.isEmpty else { return [] }
+        let n = peaks.count
+        if n == count {
+            return peaks.map { encodeU8($0) }
+        }
+        let outCount = max(1, count)
+        var out = [UInt8](repeating: 0, count: outCount)
+        for i in 0..<outCount {
+            let s = Int((Double(i) / Double(outCount)) * Double(n))
+            let e = max(s + 1, Int((Double(i + 1) / Double(outCount)) * Double(n)))
+            var mx: Float = 0
+            var j = s
+            while j < e && j < n {
+                mx = max(mx, peaks[j])
+                j += 1
+            }
+            out[i] = encodeU8(mx)
         }
         return out
     }
@@ -107,6 +263,31 @@ public struct TestLinkSnapshot: Codable, Equatable, Sendable {
 
     public func firstLoadedDeck() -> TestLinkDeck? {
         decks.first { $0.loaded }
+    }
+
+    /// JSON listo para UDP: si no cabe, compacta bands (nunca a 300 picos).
+    public func encodedForUDP() -> Data? {
+        var frame = self
+        var target = 0
+        for d in frame.decks where d.hasRGB {
+            target = max(target, d.peaksLow.count)
+        }
+        if target == 0 {
+            return try? JSONEncoder().encode(frame)
+        }
+        for _ in 0..<10 {
+            if let data = try? JSONEncoder().encode(frame), data.count <= TestLinkDeck.udpSafeBytes {
+                return data
+            }
+            target = max(TestLinkDeck.minWaveformColumns, (target * 3) / 4)
+            for i in frame.decks.indices {
+                frame.decks[i].compactBands(to: target)
+            }
+            if target <= TestLinkDeck.minWaveformColumns {
+                break
+            }
+        }
+        return try? JSONEncoder().encode(frame)
     }
 }
 
@@ -166,17 +347,17 @@ public final class TestLinkPublisher {
     public func send(_ snapshot: TestLinkSnapshot) {
         guard let sock else { return }
         var frame = snapshot
-        let sig = snapshot.decks.map { "\($0.title)|\($0.peaks.count)" }
+        let sig = snapshot.decks.map { "\($0.title)|\($0.peaks.count)|\($0.peaksLow.count)" }
         if sig == lastPeakSignature {
             frame.decks = frame.decks.map { d in
                 var c = d
-                c.peaks = []
+                c.stripWaveform()
                 return c
             }
         } else {
             lastPeakSignature = sig
         }
-        guard let data = try? JSONEncoder().encode(frame) else { return }
+        guard let data = frame.encodedForUDP() else { return }
         sock.send(data, to: TestLink.host, port: TestLink.port)
     }
 }
@@ -192,9 +373,12 @@ public final class TestLinkReceiver: ObservableObject {
     private var stopped = false
     private let queue = DispatchQueue(label: "com.entikrecords.stageconnect.testlink", qos: .userInteractive)
     private var lastPeaks: [[UInt8]] = [[], []]
+    private var lastLow: [[UInt8]] = [[], []]
+    private var lastMid: [[UInt8]] = [[], []]
+    private var lastHigh: [[UInt8]] = [[], []]
     private var lastBPM: [Double] = [0, 0]
     private var lastBPMTitle: [String] = ["", ""]
-    private var lastHeard = Date.distantPast
+    public private(set) var lastPacketAt = Date.distantPast
     private var lastRosterKey = ""
 
     public init() {}
@@ -224,22 +408,34 @@ public final class TestLinkReceiver: ObservableObject {
                 guard let (data, _) = socket.receive() else { continue }
                 guard var frame = try? JSONDecoder().decode(TestLinkSnapshot.self, from: data) else { continue }
                 if frame.decks.count > lastPeaks.count {
-                    lastPeaks.append(contentsOf: Array(repeating: [UInt8](), count: frame.decks.count - lastPeaks.count))
+                    let extra = frame.decks.count - lastPeaks.count
+                    lastPeaks.append(contentsOf: Array(repeating: [UInt8](), count: extra))
+                    lastLow.append(contentsOf: Array(repeating: [UInt8](), count: extra))
+                    lastMid.append(contentsOf: Array(repeating: [UInt8](), count: extra))
+                    lastHigh.append(contentsOf: Array(repeating: [UInt8](), count: extra))
                 }
                 if frame.decks.count > lastBPM.count {
                     lastBPM.append(contentsOf: Array(repeating: 0.0, count: frame.decks.count - lastBPM.count))
                     lastBPMTitle.append(contentsOf: Array(repeating: "", count: frame.decks.count - lastBPMTitle.count))
                 }
                 for i in frame.decks.indices {
-                    if frame.decks[i].peaks.isEmpty,
-                       frame.decks[i].loaded,
-                       i < lastPeaks.count,
-                       !lastPeaks[i].isEmpty {
-                        frame.decks[i].peaks = lastPeaks[i]
-                    } else if !frame.decks[i].peaks.isEmpty {
-                        lastPeaks[i] = frame.decks[i].peaks
+                    if frame.decks[i].loaded, i < lastPeaks.count {
+                        if frame.decks[i].peaks.isEmpty, !lastPeaks[i].isEmpty {
+                            frame.decks[i].peaks = lastPeaks[i]
+                            frame.decks[i].peaksLow = lastLow[i]
+                            frame.decks[i].peaksMid = lastMid[i]
+                            frame.decks[i].peaksHigh = lastHigh[i]
+                        } else if !frame.decks[i].peaks.isEmpty || frame.decks[i].hasRGB {
+                            lastPeaks[i] = frame.decks[i].peaks
+                            lastLow[i] = frame.decks[i].peaksLow
+                            lastMid[i] = frame.decks[i].peaksMid
+                            lastHigh[i] = frame.decks[i].peaksHigh
+                        }
                     } else if !frame.decks[i].loaded, i < lastPeaks.count {
                         lastPeaks[i] = []
+                        lastLow[i] = []
+                        lastMid[i] = []
+                        lastHigh[i] = []
                     }
                     frame.decks[i].title = TrackNaming.cleanTitle(frame.decks[i].title)
                     let title = frame.decks[i].title
@@ -257,7 +453,7 @@ public final class TestLinkReceiver: ObservableObject {
                         lastBPMTitle[i] = ""
                     }
                 }
-                lastHeard = Date()
+                lastPacketAt = Date()
                 let rosterKey = "\(frame.denonOn)|\(frame.pioneerOn)|" + frame.decks.map {
                     "\($0.loaded ? 1 : 0):\($0.title)"
                 }.joined(separator: ",")
@@ -284,7 +480,7 @@ public final class TestLinkReceiver: ObservableObject {
     private func runStale() {
         while !stopped {
             Thread.sleep(forTimeInterval: 0.4)
-            if Date().timeIntervalSince(lastHeard) > 2.0 {
+            if Date().timeIntervalSince(lastPacketAt) > 2.0 {
                 DispatchQueue.main.async {
                     if self.snapshot != nil {
                         self.snapshot = nil

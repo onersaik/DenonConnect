@@ -33,10 +33,16 @@ struct LoadedTrack {
     var title: String
     var artist: String
     var duration: Double
-    var peaks: [Float]          // 600 buckets RMS
+    var peaks: [Float]
+    var peaksLow: [Float]
+    var peaksMid: [Float]
+    var peaksHigh: [Float]
     var cues: [Double]
     var bpm: Double
     var key: String
+    var genre: String
+    var album: String
+    var comment: String
 }
 
 // Cache leíble desde el hilo del simulador (clock / StateMap) sin tocar @MainActor.
@@ -252,7 +258,13 @@ final class SimulatorController: ObservableObject {
                     duration: trackA?.duration ?? 0,
                     peaks: TestLinkDeck.quantize(trackA?.peaks ?? []),
                     isMaster: playingA || !playingB,
-                    key: trackA?.key ?? ""
+                    key: trackA?.key ?? "",
+                    genre: trackA?.genre ?? "",
+                    album: trackA?.album ?? "",
+                    comment: trackA?.comment ?? "",
+                    peaksLow: TestLinkDeck.quantize(trackA?.peaksLow ?? []),
+                    peaksMid: TestLinkDeck.quantize(trackA?.peaksMid ?? []),
+                    peaksHigh: TestLinkDeck.quantize(trackA?.peaksHigh ?? [])
                 ),
                 TestLinkDeck(
                     title: trackB?.title ?? "",
@@ -263,7 +275,13 @@ final class SimulatorController: ObservableObject {
                     duration: trackB?.duration ?? 0,
                     peaks: TestLinkDeck.quantize(trackB?.peaks ?? []),
                     isMaster: playingB && !playingA,
-                    key: trackB?.key ?? ""
+                    key: trackB?.key ?? "",
+                    genre: trackB?.genre ?? "",
+                    album: trackB?.album ?? "",
+                    comment: trackB?.comment ?? "",
+                    peaksLow: TestLinkDeck.quantize(trackB?.peaksLow ?? []),
+                    peaksMid: TestLinkDeck.quantize(trackB?.peaksMid ?? []),
+                    peaksHigh: TestLinkDeck.quantize(trackB?.peaksHigh ?? [])
                 )
             ]
         ))
@@ -297,7 +315,7 @@ final class SimulatorController: ObservableObject {
                 positionSeconds: posA * (trackA?.duration ?? 0),
                 duration: trackA?.duration ?? 0,
                 isMaster: playingA || !playingB,
-                key: ""),
+                key: trackA?.key ?? ""),
             SimDeckState(
                 title: trackB?.title ?? "",
                 artist: trackB?.artist ?? "",
@@ -306,7 +324,7 @@ final class SimulatorController: ObservableObject {
                 positionSeconds: posB * (trackB?.duration ?? 0),
                 duration: trackB?.duration ?? 0,
                 isMaster: playingB && !playingA,
-                key: "")
+                key: trackB?.key ?? "")
         ]
     }
 
@@ -332,6 +350,12 @@ final class SimulatorController: ObservableObject {
                 let tagged = Self.taggedMetadata(url: imported)
                 track.bpm = MusicalClock.bpm(namedBPM, tagged.bpm, track.bpm)
                 if !tagged.key.isEmpty { track.key = tagged.key }
+                if track.key.isEmpty {
+                    track.key = MusicalKey.resolved(raw: "", title: track.title, artist: track.artist)
+                }
+                if !tagged.genre.isEmpty { track.genre = tagged.genre }
+                if !tagged.album.isEmpty { track.album = tagged.album }
+                if !tagged.comment.isEmpty { track.comment = tagged.comment }
                 do {
                     if deck == 1 {
                         self.audioA.stopAndReset()
@@ -536,27 +560,106 @@ final class SimulatorController: ObservableObject {
 
         let duration = Double(frames) / fmt.sampleRate
         let samples = floatSamples(buf)
-        var peaks = [Float](repeating: 0, count: 600)
+        var peaks: [Float] = []
+        var peaksLow: [Float] = []
+        var peaksMid: [Float] = []
+        var peaksHigh: [Float] = []
 
         if let samples, !samples.isEmpty {
-            let n = samples.count
-            let bsz = max(1, n / 600)
-            for i in 0..<600 {
-                let s = i * bsz, e = min(s + bsz, n)
-                var rms: Float = 0
-                samples.withUnsafeBufferPointer { ptr in
-                    vDSP_rmsqv(ptr.baseAddress!.advanced(by: s), 1, &rms, vDSP_Length(e - s))
-                }
-                peaks[i] = rms
-            }
-            let mx = peaks.max() ?? 1
-            if mx > 0 { peaks = peaks.map { $0 / mx } }
+            let rgb = analyzeBands(samples: samples, sampleRate: fmt.sampleRate)
+            peaks = rgb.amp
+            peaksLow = rgb.low
+            peaksMid = rgb.mid
+            peaksHigh = rgb.high
         }
 
         let names = TrackNaming.parse(fileURL: url)
         let bpm = estimateBPM(samples: samples, sampleRate: fmt.sampleRate)
         return LoadedTrack(url: url, title: names.title, artist: names.artist,
-                           duration: duration, peaks: peaks, cues: [], bpm: bpm, key: "")
+                           duration: duration, peaks: peaks, peaksLow: peaksLow,
+                           peaksMid: peaksMid, peaksHigh: peaksHigh, cues: [], bpm: bpm, key: "",
+                           genre: "", album: "", comment: "")
+    }
+
+    /// Crossover complementario: low <250 Hz, mid 250–4 kHz, high >4 kHz.
+    /// RMS + pico por columna; ~7200 columnas reales del audio.
+    nonisolated static func analyzeBands(samples: [Float], sampleRate: Double) -> (amp: [Float], low: [Float], mid: [Float], high: [Float]) {
+        let n = samples.count
+        let target = TestLinkDeck.waveformColumns
+        let minHop = max(1, Int(sampleRate * 0.006))
+        let hop = max(minHop, max(1, n / target))
+        let count = max(64, min(target, (n + hop - 1) / hop))
+        let aLow = Float(1 - exp(-2.0 * Double.pi * 250.0 / max(1, sampleRate)))
+        let aSplit = Float(1 - exp(-2.0 * Double.pi * 4000.0 / max(1, sampleRate)))
+
+        var lowOut = [Float](repeating: 0, count: count)
+        var midOut = [Float](repeating: 0, count: count)
+        var highOut = [Float](repeating: 0, count: count)
+
+        samples.withUnsafeBufferPointer { ptr in
+            guard let src = ptr.baseAddress else { return }
+            var zLow: Float = 0
+            var zLP4k: Float = 0
+            var idx = 0
+            var i = 0
+            while i < n && idx < count {
+                let end = min(i + hop, n)
+                let len = end - i
+                var lowSq: Float = 0
+                var midSq: Float = 0
+                var highSq: Float = 0
+                var lowPk: Float = 0
+                var midPk: Float = 0
+                var highPk: Float = 0
+                var s = i
+                while s < end {
+                    let x = src[s]
+                    zLow += aLow * (x - zLow)
+                    zLP4k += aSplit * (x - zLP4k)
+                    let low = zLow
+                    let mid = zLP4k - zLow
+                    let high = x - zLP4k
+                    let al = abs(low)
+                    let am = abs(mid)
+                    let ah = abs(high)
+                    lowSq += al * al
+                    midSq += am * am
+                    highSq += ah * ah
+                    if al > lowPk { lowPk = al }
+                    if am > midPk { midPk = am }
+                    if ah > highPk { highPk = ah }
+                    s += 1
+                }
+                let inv = 1 / Float(max(1, len))
+                lowOut[idx] = 0.55 * lowPk + 0.45 * sqrt(lowSq * inv)
+                midOut[idx] = (0.55 * midPk + 0.45 * sqrt(midSq * inv)) * 1.20
+                highOut[idx] = (0.55 * highPk + 0.45 * sqrt(highSq * inv)) * 1.70
+                idx += 1
+                i = end
+            }
+            if idx < count {
+                lowOut.removeLast(count - idx)
+                midOut.removeLast(count - idx)
+                highOut.removeLast(count - idx)
+            }
+        }
+
+        var mx: Float = 0.0001
+        for v in lowOut where v > mx { mx = v }
+        for v in midOut where v > mx { mx = v }
+        for v in highOut where v > mx { mx = v }
+        let scale = 1 / mx
+        var amp = [Float](repeating: 0, count: lowOut.count)
+        for i in lowOut.indices {
+            let lo = min(1, lowOut[i] * scale)
+            let md = min(1, midOut[i] * scale)
+            let hi = min(1, highOut[i] * scale)
+            lowOut[i] = lo
+            midOut[i] = md
+            highOut[i] = hi
+            amp[i] = max(lo, md, hi)
+        }
+        return (amp, lowOut, midOut, highOut)
     }
 
     /// Mezcla a mono float aunque el archivo sea int16/int32. Sin esto el BPM
@@ -607,17 +710,23 @@ final class SimulatorController: ObservableObject {
         taggedMetadata(url: url).bpm
     }
 
-    nonisolated static func taggedMetadata(url: URL) -> (bpm: Double, key: String) {
+    nonisolated static func taggedMetadata(url: URL) -> (bpm: Double, key: String, genre: String, album: String, comment: String) {
         let asset = AVURLAsset(url: url)
         let items = asset.commonMetadata + asset.metadata
         var bpm: Double = 0
         var musKey = ""
+        var genre = ""
+        var album = ""
+        var comment = ""
         for item in items {
             let k = (item.commonKey?.rawValue ?? "").lowercased()
             let ident = item.identifier?.rawValue.lowercased() ?? ""
             let looksBPM = k.contains("bpm") || ident.contains("bpm") || ident.contains("tbpm")
                 || ident.contains("beatspermin")
             let looksKey = ident.contains("tkey") || ident.contains("initialkey") || k == "key"
+            let looksGenre = k.contains("type") || ident.contains("genre") || ident.contains("tcon")
+            let looksAlbum = k.contains("album") || ident.contains("talb") || ident.contains("albumname")
+            let looksComment = k.contains("comment") || ident.contains("comm") || ident.contains("description")
             if looksBPM && bpm == 0 {
                 if let n = item.numberValue?.doubleValue, (60...220).contains(n) { bpm = n }
                 else if let s = item.stringValue {
@@ -628,8 +737,17 @@ final class SimulatorController: ObservableObject {
             if looksKey && musKey.isEmpty {
                 if let s = item.stringValue { musKey = s.trimmingCharacters(in: .whitespacesAndNewlines) }
             }
+            if looksGenre && genre.isEmpty {
+                if let s = item.stringValue { genre = s.trimmingCharacters(in: .whitespacesAndNewlines) }
+            }
+            if looksAlbum && album.isEmpty {
+                if let s = item.stringValue { album = s.trimmingCharacters(in: .whitespacesAndNewlines) }
+            }
+            if looksComment && comment.isEmpty {
+                if let s = item.stringValue { comment = s.trimmingCharacters(in: .whitespacesAndNewlines) }
+            }
         }
-        return (bpm, musKey)
+        return (bpm, musKey, genre, album, comment)
     }
 
     nonisolated static func estimateBPM(samples: [Float]?, sampleRate: Double) -> Double {
@@ -755,7 +873,11 @@ private struct DeckPanel: View {
             .background(Color(red: 0.09, green: 0.09, blue: 0.12))
 
             // Waveform
-            WaveformView(peaks: track?.peaks ?? [], pos: pos, cues: track?.cues ?? [],
+            WaveformView(peaks: track?.peaks ?? [],
+                         peaksLow: track?.peaksLow ?? [],
+                         peaksMid: track?.peaksMid ?? [],
+                         peaksHigh: track?.peaksHigh ?? [],
+                         pos: pos, cues: track?.cues ?? [],
                          duration: track?.duration ?? 0, accent: accent) { f in
                 ctrl.seek(deck: deck, fraction: f)
             }
@@ -885,57 +1007,71 @@ private struct DeckPanel: View {
 
 private struct WaveformView: View {
     let peaks: [Float]
+    var peaksLow: [Float] = []
+    var peaksMid: [Float] = []
+    var peaksHigh: [Float] = []
     let pos: Double
     let cues: [Double]
     let duration: Double
     let accent: Color
     let onSeek: (Double) -> Void
 
+    private var hasRGB: Bool {
+        let n = peaksLow.count
+        return n > 1 && peaksMid.count == n && peaksHigh.count == n
+    }
+
     var body: some View {
         GeometryReader { geo in
             Canvas { ctx, size in
-                let n = peaks.count
+                let n = hasRGB ? peaksLow.count : peaks.count
                 guard n > 0 else {
                     ctx.fill(Path(CGRect(origin: .zero, size: size)),
                              with: .color(Color.white.opacity(0.04)))
                     return
                 }
-                let maxBars = max(1, Int(size.width))
-                let step = max(1, n / maxBars)
-                let drawn = n / step
-                let bw = size.width / CGFloat(drawn)
+                let cols = max(1, Int(size.width))
+                let bw = size.width / CGFloat(cols)
                 let playX = CGFloat(pos) * size.width
+                let midY = size.height / 2
+                let maxH = size.height * 0.46
 
                 ctx.fill(Path(CGRect(origin: .zero, size: size)),
-                         with: .color(Color.black.opacity(0.35)))
+                         with: .color(Color.black))
+                ctx.fill(Path(CGRect(x: 0, y: midY - 0.4, width: size.width, height: 0.8)),
+                         with: .color(Color.white.opacity(0.10)))
 
-                for j in 0..<drawn {
-                    let i = min(n - 1, j * step)
-                    let h = max(2, CGFloat(peaks[i]) * size.height * 0.9)
+                for j in 0..<cols {
+                    let s = Int((Double(j) / Double(cols)) * Double(n))
+                    let e = max(s + 1, Int((Double(j + 1) / Double(cols)) * Double(n)))
                     let x = CGFloat(j) * bw
-                    let y = (size.height - h) / 2
-                    let r = CGRect(x: x, y: y, width: max(1, bw - 0.6), height: h)
-                    let past = x < playX
-                    let amp = CGFloat(peaks[i])
-                    let barColor: Color
-                    if past {
-                        // Gradiente de amplitud: azul -> cian -> verde -> amarillo -> rojo
-                        if amp < 0.25 {
-                            barColor = Color(red: 0.0, green: Double(amp / 0.25) * 0.7, blue: 1.0)
-                        } else if amp < 0.5 {
-                            let t = Double((amp - 0.25) / 0.25)
-                            barColor = Color(red: 0.0, green: 0.7 + t * 0.3, blue: 1.0 - t)
-                        } else if amp < 0.75 {
-                            let t = Double((amp - 0.5) / 0.25)
-                            barColor = Color(red: t, green: 1.0, blue: 0.0)
-                        } else {
-                            let t = Double((amp - 0.75) / 0.25)
-                            barColor = Color(red: 1.0, green: 1.0 - t * 0.7, blue: 0.0)
+                    let fade: Double = x < playX ? 1.0 : 0.70
+                    if hasRGB {
+                        var lo: Float = 0, md: Float = 0, hi: Float = 0
+                        var i = s
+                        while i < e && i < n {
+                            lo = max(lo, peaksLow[i])
+                            md = max(md, peaksMid[i])
+                            hi = max(hi, peaksHigh[i])
+                            i += 1
                         }
+                        drawRGB(ctx: ctx, x: x, bw: bw, midY: midY, maxH: maxH,
+                                low: lo, mid: md, high: hi, fade: fade)
                     } else {
-                        barColor = Color(white: 0.22 + Double(amp) * 0.12)
+                        var amp: Float = 0
+                        var i = s
+                        while i < e && i < n {
+                            amp = max(amp, peaks[i])
+                            i += 1
+                        }
+                        let h = max(1, CGFloat(amp) * maxH)
+                        var g = ctx
+                        g.opacity = fade
+                        let color = Color(red: 0.22, green: 0.82, blue: 1.00)
+                        g.fill(Path(CGRect(x: x, y: midY - h, width: max(0.7, bw - 0.35), height: h)), with: .color(color))
+                        g.opacity = fade * 0.88
+                        g.fill(Path(CGRect(x: x, y: midY, width: max(0.7, bw - 0.35), height: h)), with: .color(color))
                     }
-                    ctx.fill(Path(r), with: .color(barColor))
                 }
 
                 ctx.stroke(Path { p in
@@ -959,6 +1095,40 @@ private struct WaveformView: View {
             })
         }
         .cornerRadius(4)
+    }
+
+    private func drawRGB(ctx: GraphicsContext, x: CGFloat, bw: CGFloat, midY: CGFloat, maxH: CGFloat,
+                         low: Float, mid: Float, high: Float, fade: Double) {
+        struct Layer { var h: CGFloat; var r: Double; var g: Double; var b: Double }
+        var layers = [
+            Layer(h: CGFloat(low) * maxH,  r: 1.00, g: 0.30, b: 0.05),
+            Layer(h: CGFloat(mid) * maxH,  r: 0.20, g: 0.95, b: 0.12),
+            Layer(h: CGFloat(high) * maxH, r: 0.10, g: 0.55, b: 1.00),
+        ]
+        layers.sort { $0.h < $1.h }
+        let barW = max(0.7, bw - 0.35)
+        var prev: CGFloat = 0
+        for i in 0..<layers.count {
+            let h = layers[i].h
+            let dh = h - prev
+            if dh < 0.35 {
+                prev = max(prev, h)
+                continue
+            }
+            var r = 0.0, g = 0.0, b = 0.0
+            for j in i..<layers.count {
+                r += layers[j].r
+                g += layers[j].g
+                b += layers[j].b
+            }
+            let color = Color(red: min(1, r), green: min(1, g), blue: min(1, b))
+            var gc = ctx
+            gc.opacity = fade
+            gc.fill(Path(CGRect(x: x, y: midY - h, width: barW, height: dh)), with: .color(color))
+            gc.opacity = fade * 0.90
+            gc.fill(Path(CGRect(x: x, y: midY + prev, width: barW, height: dh)), with: .color(color))
+            prev = h
+        }
     }
 }
 

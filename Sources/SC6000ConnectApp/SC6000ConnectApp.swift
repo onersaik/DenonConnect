@@ -11,6 +11,8 @@ struct SC6000ConnectApp: App {
     @StateObject private var outputs = OutputController()
     @StateObject private var artwork = ArtworkFetcher()
     @StateObject private var testLink = TestLinkReceiver()
+    @StateObject private var license = LicenseStore()
+    @State private var servicesStarted = false
 
     var body: some Scene {
         WindowGroup("STAGE CONNECT") {
@@ -20,19 +22,18 @@ struct SC6000ConnectApp: App {
                 .environmentObject(outputs)
                 .environmentObject(artwork)
                 .environmentObject(testLink)
+                .environmentObject(license)
                 .frame(minWidth: 980, minHeight: 640)
                 .preferredColorScheme(.dark)
                 .onAppear {
-                    manager.start()
-                    proDJLink.start()
-                    testLink.start()
-                    outputs.attach(stageLinq: manager, proDJLink: proDJLink, testLink: testLink)
+                    license.refresh()
+                    if license.isUnlocked { startServices() }
+                }
+                .onChange(of: license.isUnlocked) { unlocked in
+                    if unlocked { startServices() } else { stopServices() }
                 }
                 .onDisappear {
-                    outputs.shutdown()
-                    manager.stop()
-                    proDJLink.stop()
-                    testLink.stop()
+                    stopServices()
                 }
         }
         .windowStyle(.hiddenTitleBar)
@@ -41,5 +42,23 @@ struct SC6000ConnectApp: App {
         .commands {
             CommandGroup(replacing: .newItem) {} // sin "Nueva ventana": esta app es de instancia única
         }
+    }
+
+    private func startServices() {
+        guard !servicesStarted else { return }
+        servicesStarted = true
+        manager.start()
+        proDJLink.start()
+        testLink.start()
+        outputs.attach(stageLinq: manager, proDJLink: proDJLink, testLink: testLink)
+    }
+
+    private func stopServices() {
+        guard servicesStarted else { return }
+        servicesStarted = false
+        outputs.shutdown()
+        manager.stop()
+        proDJLink.stop()
+        testLink.stop()
     }
 }

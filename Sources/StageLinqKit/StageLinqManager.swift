@@ -268,7 +268,24 @@ public final class StageLinqManager: ObservableObject {
         if path.hasPrefix("/Client/Deck"), path.hasSuffix("/DeckIsMaster") {
             guard let deckNum = extractDeckNumber(from: path, prefix: "/Client/Deck") else { return }
             guard deckNum >= 1 && deckNum <= device.decks.count else { return }
-            if let state = value.state { device.decks[deckNum - 1].isMaster = state }
+            let deck = device.decks[deckNum - 1]
+            let now = Date()
+            deck.lastUpdate = now
+            deck.lastPacketAt = now
+            deck.pulseActivityIfNeeded()
+            if let state = value.state { deck.isMaster = state }
+            return
+        }
+        if path.hasPrefix("/Mixer/CH"), path.hasSuffix("faderPosition") {
+            let numChars = path.dropFirst("/Mixer/CH".count).prefix(while: { $0.isNumber })
+            if let n = Int(numChars), n >= 1, n <= device.decks.count, let v = value.value {
+                let deck = device.decks[n - 1]
+                deck.volume = v
+                let now = Date()
+                deck.lastUpdate = now
+                deck.lastPacketAt = now
+                deck.pulseActivityIfNeeded()
+            }
             return
         }
         guard path.hasPrefix("/Engine/Deck") else { return }
@@ -276,8 +293,11 @@ public final class StageLinqManager: ObservableObject {
         guard deckNum >= 1 && deckNum <= device.decks.count else { return }
         let deck = device.decks[deckNum - 1]
         let suffix = String(path.dropFirst("/Engine/Deck\(deckNum)".count))
-        deck.lastUpdate = Date()
-        device.lastSeen = Date()
+        let now = Date()
+        deck.lastUpdate = now
+        deck.lastPacketAt = now
+        deck.pulseActivityIfNeeded()
+        device.lastSeen = now
 
         switch suffix {
         case "/Play":
@@ -294,6 +314,8 @@ public final class StageLinqManager: ObservableObject {
             if let v = value.value { deck.speed = v }
         case "/ExternalMixerVolume":
             if let v = value.value { deck.volume = v }
+        case "/ExternalScratchWheelTouch":
+            if let s = value.state { deck.scratchTouch = s }
         case "/Track/ArtistName":
             if let s = value.string { deck.trackArtist = s }
         case "/Track/SongName":
@@ -309,7 +331,15 @@ public final class StageLinqManager: ObservableObject {
                 }
             }
         case "/Track/CurrentKey":
-            if let s = value.string { deck.trackKey = s }
+            if let s = value.string, MusicalKey.clean(s) != nil {
+                deck.trackKey = MusicalKey.clean(s) ?? s
+            } else if let v = value.value, let k = MusicalKey.fromIndex(Int(v)) {
+                deck.trackKey = k
+            }
+        case "/Track/CurrentKeyIndex":
+            if let v = value.value, let k = MusicalKey.fromIndex(Int(v)) {
+                if deck.trackKey.isEmpty { deck.trackKey = k }
+            }
         case "/Track/TrackLength":
             if let v = value.value { deck.trackLength = v }
         case "/Track/Genre":
@@ -333,10 +363,13 @@ public final class StageLinqManager: ObservableObject {
     }
 
     private static func applyBeat(device: StageLinqDevice, beatData: BeatData) {
-        device.lastSeen = Date()
+        let now = Date()
+        device.lastSeen = now
         for (index, beat) in beatData.decks.enumerated() {
             guard index < device.decks.count else { break }
             let deck = device.decks[index]
+            deck.lastPacketAt = now
+            deck.pulseActivityIfNeeded()
             let crossedBeat = Int(beat.beat) != Int(deck.currentBeat)
             deck.currentBeat = beat.beat
             if abs(deck.totalBeats - beat.totalBeats) > 0.01 {
