@@ -2,89 +2,43 @@ swift-driver version: 1.90.11.1 Apple Swift version 5.10 (swiftlang-5.10.0.13 cl
 Target: arm64-apple-macosx14.0
 Building for debugging...
 [0/7] Write sources
-[2/7] Write SC6000ConnectApp-entitlement.plist
+[0/7] Write SC6000ConnectApp-entitlement.plist
 [3/7] Write swift-version-76B232A4806BA581.txt
-[5/18] Emitting module StageLinqKit
-[6/22] Compiling StageLinqKit StageLinqManager.swift
-[7/22] Compiling StageLinqKit StateMapService.swift
-[8/22] Compiling StageLinqKit StatePaths.swift
-[9/22] Compiling StageLinqKit StateValue.swift
-[10/22] Compiling StageLinqKit NetworkInfo.swift
-/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Sockets.swift:65:17: error: use of 'close' refers to instance method rather than global function 'close' in module 'Darwin'
-                close(fd)
-                ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Sockets.swift:65:17: note: use 'Darwin.' to reference the global function in module 'Darwin'
-                close(fd)
-                ^
-                Darwin.
-Darwin.close:1:13: note: 'close' declared here
-public func close(_: Int32) -> Int32
-            ^
-[11/22] Compiling StageLinqKit ProDJLinkManager.swift
-/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Sockets.swift:65:17: error: use of 'close' refers to instance method rather than global function 'close' in module 'Darwin'
-                close(fd)
-                ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Sockets.swift:65:17: note: use 'Darwin.' to reference the global function in module 'Darwin'
-                close(fd)
-                ^
-                Darwin.
-Darwin.close:1:13: note: 'close' declared here
-public func close(_: Int32) -> Int32
-            ^
-[12/22] Compiling StageLinqKit Protocol.swift
-/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Sockets.swift:65:17: error: use of 'close' refers to instance method rather than global function 'close' in module 'Darwin'
-                close(fd)
-                ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Sockets.swift:65:17: note: use 'Darwin.' to reference the global function in module 'Darwin'
-                close(fd)
-                ^
-                Darwin.
-Darwin.close:1:13: note: 'close' declared here
-public func close(_: Int32) -> Int32
-            ^
-[13/22] Compiling StageLinqKit ServiceConnection.swift
-/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Sockets.swift:65:17: error: use of 'close' refers to instance method rather than global function 'close' in module 'Darwin'
-                close(fd)
-                ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Sockets.swift:65:17: note: use 'Darwin.' to reference the global function in module 'Darwin'
-                close(fd)
-                ^
-                Darwin.
-Darwin.close:1:13: note: 'close' declared here
-public func close(_: Int32) -> Int32
-            ^
-[14/22] Compiling StageLinqKit Sockets.swift
-/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Sockets.swift:65:17: error: use of 'close' refers to instance method rather than global function 'close' in module 'Darwin'
-                close(fd)
-                ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Sockets.swift:65:17: note: use 'Darwin.' to reference the global function in module 'Darwin'
-                close(fd)
-                ^
-                Darwin.
-Darwin.close:1:13: note: 'close' declared here
-public func close(_: Int32) -> Int32
-            ^
-[15/22] Compiling StageLinqKit BeatInfoService.swift
-[16/22] Compiling StageLinqKit ByteIO.swift
-[17/22] Compiling StageLinqKit Models.swift
-[18/22] Compiling StageLinqKit NetworkDevice.swift
-[19/22] Compiling StageLinqKit DJLinkProtocol.swift
-error: fatalError
+[5/18] Compiling StageLinqKit BeatInfoService.swift
+[6/18] Compiling StageLinqKit ByteIO.swift
+[7/18] Compiling StageLinqKit Models.swift
+[8/18] Compiling StageLinqKit NetworkDevice.swift
+[9/18] Compiling StageLinqKit DJLinkProtocol.swift
+[10/18] Emitting module StageLinqKit
+[11/18] Compiling StageLinqKit NetworkInfo.swift
+[12/18] Compiling StageLinqKit ProDJLinkManager.swift
+[13/18] Compiling StageLinqKit Protocol.swift
+[14/18] Compiling StageLinqKit ServiceConnection.swift
+[15/18] Compiling StageLinqKit Sockets.swift
+[16/22] Compiling StageLinqKit StageLinqManager.swift
+[17/22] Compiling StageLinqKit StateMapService.swift
+[18/22] Compiling StageLinqKit StatePaths.swift
+[19/22] Compiling StageLinqKit StateValue.swift
+[20/28] Emitting module SC6000ConnectApp
+[21/28] Compiling SC6000ConnectApp CDJStripView.swift
+[22/28] Compiling SC6000ConnectApp ContentView.swift
+[23/28] Compiling SC6000ConnectApp DeckCardView.swift
+[24/28] Compiling SC6000ConnectApp LogView.swift
+[25/28] Compiling SC6000ConnectApp SC6000ConnectApp.swift
+[26/30] Compiling SC6000ConnectApp SidebarView.swift
+[27/30] Compiling SC6000ConnectApp Theme.swift
+[27/30] Write Objects.LinkFileList
+[28/30] Linking SC6000ConnectApp
+[29/30] Applying SC6000ConnectApp
+Build complete! (13.26s)
 === RELEASE ===
 Building for production...
 [0/5] Write sources
 [2/5] Write swift-version-76B232A4806BA581.txt
 [4/6] Compiling StageLinqKit BeatInfoService.swift
-/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Sockets.swift:65:17: error: use of 'close' refers to instance method rather than global function 'close' in module 'Darwin'
-                close(fd)
-                ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Sockets.swift:65:17: note: use 'Darwin.' to reference the global function in module 'Darwin'
-                close(fd)
-                ^
-                Darwin.
-Darwin.close:1:13: note: 'close' declared here
-public func close(_: Int32) -> Int32
-            ^
-error: fatalError
+[5/7] Compiling SC6000ConnectApp CDJStripView.swift
+[5/7] Write Objects.LinkFileList
+[6/7] Linking SC6000ConnectApp
+Build complete! (9.01s)
 
-=== resultado: build=failure release=failure sha=8aebc60fcb872422aff76adc6d5b97ac1ff301e8 ===
+=== resultado: build=success release=success sha=7e77edf7d331d0e328d6b4e2d3a76e8da7414616 ===
