@@ -1,7 +1,6 @@
 // OutputController.swift
 // Coordina las salidas hacia otras aplicaciones: OSC a Resolume y SMPTE LTC
-// por audio. Toma 20 veces por segundo una foto del reloj musical del deck
-// que manda y se la pasa a cada salida activa.
+// por audio. Admite fuente LTC por deck específico o auto-follow al master/on-air.
 
 import Foundation
 import Combine
@@ -23,6 +22,10 @@ final class OutputController: ObservableObject {
     @Published var ltcError: String = ""
     @Published var ltcDevices: [AudioDeviceInfo] = []
     @Published var ltcSelectedDeviceID: AudioDeviceID = 0   // 0 = por defecto del sistema
+
+    /// ID del deck (DeckDisplay.id) fijado como fuente LTC. nil = auto-follow master/on-air.
+    @Published var ltcSourceDeckID: String? = nil
+    @Published var ltcAutoFollow: Bool = true
 
     // Estado mostrado
     @Published var clockSource = "—"
@@ -50,34 +53,31 @@ final class OutputController: ObservableObject {
         self.timer = timer
     }
 
-    deinit {
-        timer?.invalidate()
+    deinit { timer?.invalidate() }
+
+    // MARK: LTC fuente por deck
+
+    /// Fija el LTC a un deck concreto (nil = vuelve a auto-follow master/on-air).
+    func setLTCSource(_ id: String?) {
+        ltcSourceDeckID = id
+        ltcAutoFollow   = (id == nil)
     }
 
     // MARK: Resolume
 
     func toggleResolume() {
         if resolumeEnabled {
-            bridge?.stop()
-            bridge = nil
-            resolumeEnabled = false
+            bridge?.stop(); bridge = nil; resolumeEnabled = false
         } else {
             let port = UInt16(resolumePort) ?? 7000
-            let bridge = ResolumeBridge(
-                host: resolumeHost,
-                port: port,
+            let b = ResolumeBridge(
+                host: resolumeHost, port: port,
                 tempoMode: resolumeTempoMode,
                 sendResyncOnDownbeat: resolumeResync,
                 log: { [weak self] in self?.logSink?($0) }
             )
-            bridge.start()
-            self.bridge = bridge
-            resolumeEnabled = true
+            b.start(); bridge = b; resolumeEnabled = true
         }
-    }
-
-    func refreshLTCDevices() {
-        ltcDevices = LTCGenerator.availableOutputDevices()
     }
 
     func applyResolumeSettings() {
@@ -87,44 +87,49 @@ final class OutputController: ObservableObject {
         bridge.update(host: resolumeHost, port: UInt16(resolumePort) ?? 7000)
     }
 
+    func refreshLTCDevices() {
+        ltcDevices = LTCGenerator.availableOutputDevices()
+    }
+
     // MARK: SMPTE
 
     func toggleLTC() {
         if ltcEnabled {
-            ltc?.stop()
-            ltc = nil
-            ltcEnabled = false
-            ltcError = ""
+            ltc?.stop(); ltc = nil; ltcEnabled = false; ltcError = ""
         } else {
             let generator = LTCGenerator(log: { [weak self] in self?.logSink?($0) })
             generator.frameRate = ltcFrameRate
             generator.outputDeviceID = ltcSelectedDeviceID == 0 ? nil : ltcSelectedDeviceID
             do {
                 try generator.start()
-                ltc = generator
-                ltcEnabled = true
-                ltcError = ""
+                ltc = generator; ltcEnabled = true; ltcError = ""
             } catch {
-                ltcError = "\(error)"
-                logSink?("❌ SMPTE: \(error)")
+                ltcError = "\(error)"; logSink?("❌ SMPTE: \(error)")
             }
         }
     }
 
-    // MARK: Reloj
+    // MARK: Tick 20 Hz
 
     private func tick() {
-        let snapshot = currentSnapshot()
+        let masterSnapshot = currentSnapshot()
 
-        clockSource = snapshot.sourceLabel
-        clockBPM = snapshot.bpm
+        // LTC usa deck fijado si hay uno; si no, sigue al master
+        let ltcSnapshot: SyncSnapshot
+        if !ltcAutoFollow, let id = ltcSourceDeckID,
+           let specific = snapshotForDeckID(id) {
+            ltcSnapshot = specific
+        } else {
+            ltcSnapshot = masterSnapshot
+        }
 
-        bridge?.send(snapshot)
+        clockSource = masterSnapshot.sourceLabel
+        clockBPM    = masterSnapshot.bpm
+
+        bridge?.send(masterSnapshot)
 
         if let ltc {
-            // Corregimos la deriva solo si se va de sitio de verdad: así el
-            // timecode sale continuo en vez de dando saltos.
-            if let playhead = snapshot.playhead, snapshot.isPlaying {
+            if let playhead = ltcSnapshot.playhead, ltcSnapshot.isPlaying {
                 if abs(ltc.currentPositionSeconds() - playhead) > 0.15 {
                     ltc.seek(toSeconds: playhead)
                 }
@@ -133,32 +138,71 @@ final class OutputController: ObservableObject {
         }
     }
 
-    /// Elige el deck que manda: primero el marcado como master, y si no hay
-    /// ninguno, el primero que esté sonando.
+    // MARK: Snapshot de deck específico
+
+    private func snapshotForDeckID(_ id: String) -> SyncSnapshot? {
+        if let sl = stageLinq {
+            for device in sl.devices {
+                for deck in device.decks {
+                    if "denon-\(device.id)-\(deck.id)" == id {
+                        let b = Int(deck.currentBeat)
+                        return SyncSnapshot(
+                            bpm: deck.bpm,
+                            beatInBar: b > 0 ? (b % 4) + 1 : 0,
+                            beatCount: b,
+                            playhead: deck.beatProgress.map { $0 * deck.trackLength },
+                            isPlaying: deck.playState == .playing,
+                            sourceLabel: "Denon deck \(deck.id)"
+                        )
+                    }
+                }
+            }
+        }
+        if let pdl = proDJLink {
+            for device in pdl.devices {
+                if "pioneer-\(device.id)" == id {
+                    return SyncSnapshot(
+                        bpm: device.effectiveBPM,
+                        beatInBar: device.beatInBar,
+                        beatCount: device.beatCount,
+                        playhead: device.hasPosition ? device.playhead : nil,
+                        isPlaying: device.isPlaying,
+                        sourceLabel: "CDJ player \(device.playerNumber)"
+                    )
+                }
+            }
+        }
+        return nil
+    }
+
+    // MARK: Master snapshot (auto-follow)
+
+    /// Elige el deck que manda: master+playing > on-air+playing > primer deck sonando.
     private func currentSnapshot() -> SyncSnapshot {
+        var onAirFallback: SyncSnapshot?
         var playingFallback: SyncSnapshot?
 
-        if let stageLinq {
-            for device in stageLinq.devices {
+        if let sl = stageLinq {
+            for device in sl.devices {
                 for deck in device.decks where deck.songLoaded {
-                    let beatCount = Int(deck.currentBeat)
-                    let snapshot = SyncSnapshot(
+                    let b = Int(deck.currentBeat)
+                    let snap = SyncSnapshot(
                         bpm: deck.bpm,
-                        beatInBar: beatCount > 0 ? (beatCount % 4) + 1 : 0,
-                        beatCount: beatCount,
+                        beatInBar: b > 0 ? (b % 4) + 1 : 0,
+                        beatCount: b,
                         playhead: deck.beatProgress.map { $0 * deck.trackLength },
                         isPlaying: deck.playState == .playing,
                         sourceLabel: "Denon deck \(deck.id)"
                     )
-                    if deck.isMaster && snapshot.isPlaying { return snapshot }
-                    if snapshot.isPlaying && playingFallback == nil { playingFallback = snapshot }
+                    if deck.isMaster && snap.isPlaying { return snap }
+                    if snap.isPlaying && playingFallback == nil { playingFallback = snap }
                 }
             }
         }
 
-        if let proDJLink {
-            for device in proDJLink.devices {
-                let snapshot = SyncSnapshot(
+        if let pdl = proDJLink {
+            for device in pdl.devices {
+                let snap = SyncSnapshot(
                     bpm: device.effectiveBPM,
                     beatInBar: device.beatInBar,
                     beatCount: device.beatCount,
@@ -166,11 +210,12 @@ final class OutputController: ObservableObject {
                     isPlaying: device.isPlaying,
                     sourceLabel: "CDJ player \(device.playerNumber)"
                 )
-                if device.isMaster && snapshot.isPlaying { return snapshot }
-                if snapshot.isPlaying && playingFallback == nil { playingFallback = snapshot }
+                if device.isMaster && snap.isPlaying { return snap }
+                if device.isOnAir && snap.isPlaying && onAirFallback == nil { onAirFallback = snap }
+                if snap.isPlaying && playingFallback == nil { playingFallback = snap }
             }
         }
 
-        return playingFallback ?? SyncSnapshot.idle
+        return onAirFallback ?? playingFallback ?? SyncSnapshot.idle
     }
 }
