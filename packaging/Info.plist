@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>SC6000 Connect</string>
+    <key>CFBundleDisplayName</key>
+    <string>SC6000 Connect</string>
+    <key>CFBundleExecutable</key>
+    <string>SC6000Connect</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.entikrecords.sc6000connect</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>2.0.0</string>
+    <key>CFBundleVersion</key>
+    <string>2</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.music</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+    <!-- macOS pide permiso de red local para descubrir los reproductores.
+         Sin esta descripción el sistema puede denegarlo en silencio. -->
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>SC6000 Connect necesita la red local para descubrir tus reproductores Denon SC6000 (StageLinq) y Pioneer CDJ (Pro DJ Link).</string>
+</dict>
+</plist>
