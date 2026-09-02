@@ -2,6 +2,7 @@
 // Panel de salidas hacia otras aplicaciones: OSC a Resolume y SMPTE LTC.
 
 import SwiftUI
+import CoreAudio
 import StageLinqKit
 
 struct OutputsView: View {
