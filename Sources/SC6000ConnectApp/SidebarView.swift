@@ -51,7 +51,7 @@ struct SidebarView: View {
             Spacer()
 
             VStack(alignment: .leading, spacing: 3) {
-                Text("StageLinq · UDP \(StageLinq.listenPort)")
+                Text("StageLinq · UDP \(Int(StageLinq.listenPort))")
                     .font(.system(size: 9))
                     .foregroundColor(Theme.textTertiary)
                 Text("SC6000 Connect — no oficial")

@@ -62,7 +62,8 @@ public final class UDPSocket {
                 }
             }
             guard result == 0 else {
-                close(fd)
+                // Darwin. explícito: sin él resolvería al método close() de esta clase.
+                Darwin.close(fd)
                 throw SocketError.bindFailed(lastErrnoString())
             }
         }
