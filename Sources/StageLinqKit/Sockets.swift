@@ -123,11 +123,13 @@ public final class TCPListener {
     public let port: UInt16
 
     public init(port: UInt16) throws {
-        fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
-        guard fd >= 0 else { throw SocketError.creationFailed(lastErrnoString()) }
+        // Trabajamos con un descriptor local: si el closure usara la propiedad
+        // capturaría self antes de estar todo inicializado, y eso no compila.
+        let listenFD = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
+        guard listenFD >= 0 else { throw SocketError.creationFailed(lastErrnoString()) }
 
         var reuse: Int32 = 1
-        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout<Int32>.size))
+        setsockopt(listenFD, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout<Int32>.size))
 
         var addr = sockaddr_in()
         addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
@@ -137,17 +139,19 @@ public final class TCPListener {
 
         let bound = withUnsafePointer(to: &addr) { ptr -> Int32 in
             ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+                bind(listenFD, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
             }
         }
         guard bound == 0 else {
-            Darwin.close(fd)
+            Darwin.close(listenFD)
             throw SocketError.bindFailed(lastErrnoString())
         }
-        guard listen(fd, 8) == 0 else {
-            Darwin.close(fd)
+        guard listen(listenFD, 8) == 0 else {
+            Darwin.close(listenFD)
             throw SocketError.bindFailed(lastErrnoString())
         }
+
+        self.fd = listenFD
         self.port = port
     }
 
