@@ -419,22 +419,22 @@ struct PlayerDeckRow: View {
     private var masterButton: some View {
         Button(action: { onPinMaster() }) {
             HStack(spacing: 3) {
-                Image(systemName: deck.isMaster ? "crown.fill" : "crown")
+                Image(systemName: isLTCSource ? "crown.fill" : "crown")
                     .font(.system(size: 7))
                 Text("MST")
                     .font(.system(size: 8, weight: .bold))
                     .tracking(0.3)
             }
-            .foregroundColor(deck.isMaster ? .black : Theme.accent.opacity(0.75))
+            .foregroundColor(isLTCSource ? .black : Theme.accent.opacity(0.75))
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
             .background(
                 Rectangle()
-                    .fill(deck.isMaster ? Theme.accent : Theme.accent.opacity(0.12))
+                    .fill(isLTCSource ? Theme.accent : Theme.accent.opacity(0.12))
             )
         }
         .buttonStyle(.plain)
-        .help(deck.isMaster ? "Este deck es el MASTER actual." : "Fijar este deck como MASTER LTC ahora.")
+        .help(isLTCSource ? "MASTER fijado a este deck. Pulsa SMPTE para cambiar canal." : "Fijar este deck como MASTER ahora.")
     }
 
     private var titleText: String {

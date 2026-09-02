@@ -79,6 +79,7 @@ public final class ProDJLinkDevice: ObservableObject, Identifiable {
     @Published public var hasStatus: Bool = false
     /// No @Published: actualizarlo en cada paquete reventaba SwiftUI.
     public var lastSeen: Date = Date()
+    public var positionReceivedAt: Date = Date()  // No @Published — solo para interpolación
 
     public init(playerNumber: Int, model: String, ip: String) {
         self.id = "cdj-\(playerNumber)-\(ip)"
@@ -348,9 +349,13 @@ public final class ProDJLinkManager: ObservableObject {
         }
         target.lastSeen = Date()
         if NetworkInfo.isLocalIPv4(ip) { return }
+        let recvAt = Date()
         DispatchQueue.main.async {
             if abs(target.trackLength - pos.trackLength) > 0.01 { target.trackLength = pos.trackLength }
-            if abs(target.playhead - pos.playhead) > 0.001 { target.playhead = pos.playhead }
+            if abs(target.playhead - pos.playhead) > 0.001 {
+                target.playhead = pos.playhead
+                target.positionReceivedAt = recvAt
+            }
             if !target.hasPosition { target.hasPosition = true }
         }
     }

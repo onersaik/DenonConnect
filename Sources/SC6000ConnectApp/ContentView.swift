@@ -445,16 +445,19 @@ struct PioneerDeckRow: View {
     @EnvironmentObject var outputs: OutputController
 
     var body: some View {
-        let display = DeckDisplayBuilder.row(for: device, overlay: nil)
-        PlayerDeckRow(
-            deck: display,
-            isLarge: isLarge,
-            isLTCSource: outputs.isRowLTCLit(display.id),
-            isHot: outputs.isWaveformHot(display.id),
-            ltcAutoFollow: outputs.ltcAutoFollow,
-            onSelectLTC: { outputs.toggleRowLTC(display.id) },
-            onPinMaster: { outputs.pinMaster(to: display.id) }
-        )
+        // TimelineView: redraw at 30fps for smooth playhead interpolation
+        TimelineView(.periodic(from: .now, by: 1.0 / 30.0)) { _ in
+            let display = DeckDisplayBuilder.row(for: device, overlay: nil)
+            PlayerDeckRow(
+                deck: display,
+                isLarge: isLarge,
+                isLTCSource: outputs.isRowLTCLit(display.id),
+                isHot: outputs.isWaveformHot(display.id),
+                ltcAutoFollow: outputs.ltcAutoFollow,
+                onSelectLTC: { outputs.toggleRowLTC(display.id) },
+                onPinMaster: { outputs.pinMaster(to: display.id) }
+            )
+        }
     }
 }
 
@@ -629,9 +632,21 @@ enum DeckDisplayBuilder {
         let hasPlayhead = overlay?.progress != nil
             || (device.trackLoaded && device.hasPosition && device.trackLength > 0)
         let bpm = MusicalClock.bpm(overlay?.bpm ?? 0, device.effectiveBPM, device.trackBPM)
-        let progress = overlay?.progress ?? (hasPlayhead ? device.progress : nil)
         let length = overlay?.duration ?? (hasPlayhead ? device.trackLength : nil)
-        let elapsed = overlay?.position ?? (hasPlayhead ? device.playhead : nil)
+        // Interpolate Pioneer playhead between network packets for smooth waveform
+        let elapsed: Double? = {
+            if let ov = overlay?.position { return ov }
+            guard hasPlayhead else { return nil }
+            let raw = device.playhead
+            guard device.isPlaying, let len = length, len > 0 else { return raw }
+            let dt = min(Date().timeIntervalSince(device.positionReceivedAt), 2.0)
+            return min(raw + dt, len)
+        }()
+        let progress: Double? = {
+            if let ov = overlay?.progress { return ov }
+            guard hasPlayhead, let el = elapsed, let len = length, len > 0 else { return nil }
+            return min(max(el / len, 0), 1)
+        }()
         let pitch: Double? = {
             if overlay != nil { return nil }
             return device.trackLoaded && abs(device.pitchPercent) > 0.01 ? device.pitchPercent : nil
