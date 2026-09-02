@@ -18,8 +18,11 @@ struct ContentView: View {
     @EnvironmentObject var manager: StageLinqManager
     @EnvironmentObject var proDJLink: ProDJLinkManager
 
+    @EnvironmentObject var outputs: OutputController
+
     @State private var mode: AppMode = .auto
     @State private var showLog = false
+    @State private var showOutputs = false
 
     /// En modo Auto elegimos según lo que haya realmente en la red.
     private var effectiveMode: AppMode {
@@ -88,6 +91,13 @@ struct ContentView: View {
             CreditsFooter()
         }
         .background(Theme.background)
+        .sheet(isPresented: $showOutputs) {
+            OutputsView().environmentObject(outputs)
+        }
+    }
+
+    private var outputsActive: Bool {
+        outputs.resolumeEnabled || outputs.ltcEnabled
     }
 
     private var header: some View {
@@ -118,6 +128,24 @@ struct ContentView: View {
             .pickerStyle(.segmented)
             .frame(width: 280)
             .labelsHidden()
+
+            Button {
+                showOutputs = true
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "antenna.radiowaves.left.and.right")
+                        .font(.system(size: 11))
+                    Text("SALIDAS")
+                        .font(.system(size: 10, weight: .bold))
+                        .tracking(0.5)
+                }
+                .foregroundColor(outputsActive ? Theme.ledGreen : Theme.textSecondary)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 6)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.06)))
+            }
+            .buttonStyle(.plain)
+            .help("Enviar tempo a Resolume por OSC y timecode SMPTE por audio")
 
             Button {
                 showLog.toggle()

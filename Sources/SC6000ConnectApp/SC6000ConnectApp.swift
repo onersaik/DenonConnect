@@ -8,17 +8,20 @@ import StageLinqKit
 struct SC6000ConnectApp: App {
     @StateObject private var manager = StageLinqManager()
     @StateObject private var proDJLink = ProDJLinkManager()
+    @StateObject private var outputs = OutputController()
 
     var body: some Scene {
         WindowGroup("SC6000 Connect") {
             ContentView()
                 .environmentObject(manager)
                 .environmentObject(proDJLink)
+                .environmentObject(outputs)
                 .frame(minWidth: 980, minHeight: 640)
                 .preferredColorScheme(.dark)
                 .onAppear {
                     manager.start()
                     proDJLink.start()
+                    outputs.attach(stageLinq: manager, proDJLink: proDJLink)
                 }
                 .onDisappear {
                     manager.stop()
