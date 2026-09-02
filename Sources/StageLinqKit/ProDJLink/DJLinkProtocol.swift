@@ -231,6 +231,82 @@ public struct CDJStatus {
     }
 }
 
+// MARK: - Paquetes del puerto de beats (50001)
+
+/// Paquete de beat: llega justo en cada golpe, así que es la señal de
+/// sincronía más precisa que emite un CDJ (mucho mejor que el estado, que
+/// llega cada 200 ms).
+public struct DJLinkBeat {
+    public var playerNumber: Int
+    public var beatInBar: Int      // 1…4
+    public var bpm: Double
+    public var pitchPercent: Double
+
+    /// Offsets: 0x21 nº reproductor · 0x54-0x57 pitch · 0x5a-0x5b BPM · 0x5c beat.
+    public static func parse(_ b: [UInt8]) -> DJLinkBeat? {
+        guard b.count >= 0x60 else { return nil }
+        let pitchRatio = Double(DJLinkCodec.readUInt32(b, at: 0x54)) / Double(0x100000)
+        let bpmRaw = DJLinkCodec.readUInt16(b, at: 0x5a)
+        return DJLinkBeat(
+            playerNumber: Int(b[0x21]),
+            beatInBar: Int(b[0x5c]),
+            bpm: bpmRaw == 0xffff ? 0 : Double(bpmRaw) / 100.0,
+            pitchPercent: (pitchRatio - 1.0) * 100.0
+        )
+    }
+}
+
+/// Posición absoluta: solo la emiten los CDJ-3000. Es la única fuente de
+/// tiempo transcurrido y duración real de la pista en Pro DJ Link.
+public struct DJLinkAbsolutePosition {
+    public var playerNumber: Int
+    public var trackLength: Double  // segundos
+    public var playhead: Double     // segundos
+    public var bpm: Double
+
+    /// Offsets: 0x21 nº reproductor · 0x24-0x27 duración (s) ·
+    /// 0x28-0x2b posición (ms) · 0x38-0x3b BPM ×10.
+    public static func parse(_ b: [UInt8]) -> DJLinkAbsolutePosition? {
+        guard b.count >= 0x3c else { return nil }
+        let lengthSeconds = Double(DJLinkCodec.readUInt32(b, at: 0x24))
+        let playheadMs = Double(DJLinkCodec.readUInt32(b, at: 0x28))
+        let bpmRaw = Double(DJLinkCodec.readUInt32(b, at: 0x38))
+        return DJLinkAbsolutePosition(
+            playerNumber: Int(b[0x21]),
+            trackLength: lengthSeconds,
+            playhead: playheadMs / 1000.0,
+            bpm: bpmRaw / 10.0
+        )
+    }
+}
+
+public enum DJLinkBeatPacket {
+    public static let typeBeat: UInt8 = 0x28
+    public static let typeAbsolutePosition: UInt8 = 0x0b
+
+    public enum Parsed {
+        case beat(DJLinkBeat)
+        case position(DJLinkAbsolutePosition)
+    }
+
+    public static func parse(_ data: Data) -> Parsed? {
+        let b = [UInt8](data)
+        guard b.count >= 0x24 else { return nil }
+        guard Array(b[0..<10]) == DJLink.magic else { return nil }
+
+        switch b[DJLink.Header.type] {
+        case typeBeat:
+            if let beat = DJLinkBeat.parse(b) { return .beat(beat) }
+            return nil
+        case typeAbsolutePosition:
+            if let pos = DJLinkAbsolutePosition.parse(b) { return .position(pos) }
+            return nil
+        default:
+            return nil
+        }
+    }
+}
+
 // MARK: - Utilidades de bytes
 
 public enum DJLinkCodec {

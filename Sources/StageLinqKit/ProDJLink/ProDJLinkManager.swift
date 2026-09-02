@@ -40,6 +40,17 @@ public final class ProDJLinkDevice: ObservableObject, Identifiable {
     @Published public var beatInBar: Int = 0
     @Published public var beatPulse: Bool = false
 
+    // Solo CDJ-3000: posición exacta de reproducción (puerto 50001).
+    @Published public var trackLength: Double = 0   // segundos
+    @Published public var playhead: Double = 0      // segundos
+    @Published public var hasPosition: Bool = false
+
+    public var remaining: Double { max(trackLength - playhead, 0) }
+    public var progress: Double {
+        guard trackLength > 0 else { return 0 }
+        return min(max(playhead / trackLength, 0), 1)
+    }
+
     @Published public var hasStatus: Bool = false
     @Published public var lastSeen: Date = Date()
 
@@ -61,6 +72,7 @@ public final class ProDJLinkManager: ObservableObject {
 
     private var keepAliveSocket: UDPSocket?
     private var statusSocket: UDPSocket?
+    private var beatSocket: UDPSocket?
     private var stoppedFlag = false
 
     public init() {}
@@ -80,6 +92,7 @@ public final class ProDJLinkManager: ObservableObject {
         bookkeepingQueue.sync { stoppedFlag = false }
         netQueue.async { [weak self] in self?.runKeepAliveListener() }
         netQueue.async { [weak self] in self?.runStatusListener() }
+        netQueue.async { [weak self] in self?.runBeatListener() }
         netQueue.async { [weak self] in self?.runVirtualCDJAnnounce() }
     }
 
@@ -87,6 +100,7 @@ public final class ProDJLinkManager: ObservableObject {
         bookkeepingQueue.sync { stoppedFlag = true }
         keepAliveSocket?.close()
         statusSocket?.close()
+        beatSocket?.close()
     }
 
     // MARK: - 1. Descubrimiento (puerto 50000)
@@ -171,6 +185,59 @@ public final class ProDJLinkManager: ObservableObject {
         }
     }
 
+    // MARK: - 4. Beats y posición exacta (puerto 50001)
+
+    private func runBeatListener() {
+        do {
+            let socket = try UDPSocket(listenPort: DJLink.beatPort)
+            beatSocket = socket
+            log("🥁 Pro DJ Link: escuchando beats en UDP :\(DJLink.beatPort)")
+
+            while !stopped {
+                guard let (data, ip) = socket.receive() else { continue }
+                guard let parsed = DJLinkBeatPacket.parse(data) else { continue }
+                switch parsed {
+                case .beat(let beat):
+                    applyBeat(beat, ip: ip)
+                case .position(let pos):
+                    applyPosition(pos, ip: ip)
+                }
+            }
+            socket.close()
+        } catch {
+            log("❌ Pro DJ Link: no se pudo escuchar en UDP \(DJLink.beatPort): \(error)")
+        }
+    }
+
+    /// Busca el dispositivo por número de reproductor; los paquetes de beat
+    /// pueden llegar por broadcast desde una IP que no coincida exactamente.
+    private func deviceForPlayer(_ playerNumber: Int, ip: String) -> ProDJLinkDevice? {
+        let exact = bookkeepingQueue.sync { devicesByKey["\(playerNumber)@\(ip)"] }
+        if let exact { return exact }
+        return bookkeepingQueue.sync {
+            devicesByKey.values.first { $0.playerNumber == playerNumber }
+        }
+    }
+
+    private func applyBeat(_ beat: DJLinkBeat, ip: String) {
+        guard let target = deviceForPlayer(beat.playerNumber, ip: ip) else { return }
+        DispatchQueue.main.async {
+            target.beatInBar = beat.beatInBar
+            target.beatPulse.toggle()
+            target.lastSeen = Date()
+        }
+    }
+
+    private func applyPosition(_ pos: DJLinkAbsolutePosition, ip: String) {
+        guard let target = deviceForPlayer(pos.playerNumber, ip: ip) else { return }
+        DispatchQueue.main.async {
+            target.trackLength = pos.trackLength
+            target.playhead = pos.playhead
+            target.hasPosition = true
+            target.lastSeen = Date()
+        }
+    }
+
     private func applyStatus(_ status: CDJStatus, ip: String) {
         let key = "\(status.playerNumber)@\(ip)"
         var device: ProDJLinkDevice? = bookkeepingQueue.sync { devicesByKey[key] }
@@ -191,8 +258,6 @@ public final class ProDJLinkManager: ObservableObject {
         guard let target = device else { return }
 
         DispatchQueue.main.async {
-            let crossedBeat = target.beatCount != status.beatCount
-
             target.model = status.model.isEmpty ? target.model : status.model
             target.firmware = status.firmware
             target.isPlaying = status.isPlaying
@@ -207,13 +272,10 @@ public final class ProDJLinkManager: ObservableObject {
             target.pitchPercent = status.pitchPercent
             target.effectiveBPM = status.effectiveBPM
             target.beatCount = status.beatCount
-            target.beatInBar = status.beatInBar
             target.hasStatus = true
             target.lastSeen = Date()
-
-            if crossedBeat && status.isPlaying {
-                target.beatPulse.toggle()
-            }
+            // El parpadeo de beat lo marcan los paquetes del puerto 50001,
+            // que llegan justo en el golpe y son mucho más precisos.
         }
     }
 }

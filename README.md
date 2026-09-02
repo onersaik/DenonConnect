@@ -1,5 +1,7 @@
 # SC6000 Connect
 
+**DJ Saik** · [@dj.saik](https://instagram.com/dj.saik) · [@entikrecords](https://instagram.com/entikrecords)
+
 App nativa de macOS (ventana propia, sin terminal) que muestra en vivo el estado
 de tus reproductores de DJ en red:
 
@@ -73,6 +75,38 @@ Link y la app no verá los CDJ. Cierra rekordbox si quieres ver los CDJ aquí.
 Para que los CDJ envíen estado detallado, la app se anuncia en la red como
 reproductor virtual número **7** (fuera del rango 1–6 que usan los
 reproductores reales, para no provocar conflictos de número de player).
+
+## Modos
+
+Selector en la cabecera:
+
+- **Auto** — detecta lo que hay en la red y elige solo. Si ve Denon y Pioneer a
+  la vez, pasa a Dual.
+- **Denon** — solo SC6000 / Engine OS.
+- **Pioneer** — solo CDJ / Pro DJ Link.
+- **Dual** — todo junto, apilado. Sin límite de 2 decks: muestra los que haya
+  (4, 6 o los que aparezcan en la red).
+
+## Formas de onda y cues — estado real
+
+**Todavía no están, y es importante entender por qué:** ni StageLinq ni Pro DJ
+Link emiten la forma de onda por la red. Lo que se ve en un CDJ o en ShowKontrol
+sale de la **base de datos del reproductor**, que hay que pedir aparte:
+
+- **CDJ (Pro DJ Link)** → cliente TCP `dbserver` del reproductor
+  (`GetWaveformPreview`, `GetWaveformDetailed`, `GetWaveformHD`,
+  `GetCueAndLoops`). Es también lo que da **título y artista** reales.
+- **SC6000 (StageLinq)** → servicio `FileTransfer` + lectura de la base de datos
+  de Engine y sus ficheros de análisis.
+
+Son dos implementaciones nuevas y considerables, una por protocolo. Está
+documentado y es viable, pero es la siguiente fase del proyecto, no un ajuste
+de la interfaz.
+
+Mientras tanto, la fila de cada deck muestra **rejilla de beats en vivo**
+(posición dentro del compás, con dato real de red), barra de posición, tiempo
+transcurrido y restante, y BPM efectivo. Nada de esto está inventado ni
+interpolado a ojo.
 
 ## Qué muestra cada protocolo, y qué no
 

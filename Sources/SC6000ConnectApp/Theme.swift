@@ -17,6 +17,8 @@ enum Theme {
     static let yellow = Color(red: 0.98, green: 0.78, blue: 0.30)
     static let purple = Color(red: 0.68, green: 0.55, blue: 0.98)
     static let cyan = Color(red: 0.35, green: 0.82, blue: 0.90)
+    /// Verde de display de reproductor, para los dígitos LED.
+    static let ledGreen = Color(red: 0.42, green: 1.0, blue: 0.55)
 
     static func deckAccent(_ index: Int) -> Color {
         switch index {
