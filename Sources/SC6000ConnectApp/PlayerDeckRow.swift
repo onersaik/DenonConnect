@@ -2,6 +2,7 @@
 // Fila de deck: modo Grande (ShowKontrol) con tiempo LED en bloques + modo Pequeño compacto.
 
 import SwiftUI
+import AppKit
 import StageLinqKit
 
 // MARK: - Modelo normalizado
@@ -29,6 +30,10 @@ struct DeckDisplay: Identifiable {
     let trackLength: Double?
     let progress: Double?       // 0…1
     let accent: Color
+    let cuePositionFraction: Double?    // 0…1 cue activo; nil = sin cue
+    let loopInFraction: Double?         // 0…1
+    let loopOutFraction: Double?        // 0…1
+    var artworkImage: NSImage? = nil   // portada del album (iTunes)
 
     var trackSeed: Int {
         var h = 0
@@ -65,7 +70,10 @@ struct PlayerDeckRow: View {
                 beatInBar:   deck.beatInBar,
                 isPlaying:   deck.isPlaying,
                 accent:      deck.accent,
-                trackSeed:   deck.trackSeed
+                trackSeed:   deck.trackSeed,
+                cuePositionFraction: deck.cuePositionFraction,
+                loopInFraction:  deck.loopInFraction,
+                loopOutFraction: deck.loopOutFraction
             )
             .frame(height: 72)
             .padding(.horizontal, 14)
@@ -253,7 +261,10 @@ struct PlayerDeckRow: View {
                 beatInBar:   deck.beatInBar,
                 isPlaying:   deck.isPlaying,
                 accent:      deck.accent,
-                trackSeed:   deck.trackSeed
+                trackSeed:   deck.trackSeed,
+                cuePositionFraction: deck.cuePositionFraction,
+                loopInFraction:  deck.loopInFraction,
+                loopOutFraction: deck.loopOutFraction
             )
             .frame(width: 90, height: 44)
             .opacity(deck.loaded ? 1 : 0.30)

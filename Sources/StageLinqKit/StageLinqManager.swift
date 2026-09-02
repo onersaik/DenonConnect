@@ -58,7 +58,7 @@ public final class StageLinqManager: ObservableObject {
         do {
             let socket = try UDPSocket(listenPort: StageLinq.listenPort)
             udpListener = socket
-            log("👂 Escuchando dispositivos StageLinq en UDP :\(StageLinq.listenPort)")
+            log(" Escuchando dispositivos StageLinq en UDP :\(StageLinq.listenPort)")
 
             while !stopped {
                 guard let (data, ip) = socket.receive() else { continue }
@@ -70,7 +70,7 @@ public final class StageLinqManager: ObservableObject {
             }
             socket.close()
         } catch {
-            log("❌ No se pudo escuchar en UDP \(StageLinq.listenPort): \(error)")
+            log(" No se pudo escuchar en UDP \(StageLinq.listenPort): \(error)")
         }
     }
 
@@ -84,7 +84,7 @@ public final class StageLinqManager: ObservableObject {
             port: 0
         )
         guard let sock = try? UDPSocket(listenPort: nil) else {
-            log("⚠️ No se pudo crear el socket de anuncio")
+            log("[WARN] No se pudo crear el socket de anuncio")
             return
         }
         while !stopped {
@@ -110,7 +110,7 @@ public final class StageLinqManager: ObservableObject {
         DispatchQueue.main.async {
             self.devices.append(device)
         }
-        log("🎛 Descubierto: \(info.name) (\(info.source)) v\(info.version) @ \(key)")
+        log(" Descubierto: \(info.name) (\(info.source)) v\(info.version) @ \(key)")
 
         connectToDevice(device)
     }
@@ -135,7 +135,7 @@ public final class StageLinqManager: ObservableObject {
                         if !announcedConnected {
                             announcedConnected = true
                             device.connectionState = .connected
-                            self.log("✅ Conectado: \(device.name) (\(device.ip))")
+                            self.log(" Conectado: \(device.name) (\(device.ip))")
                         }
                     }
                     if let statePort = services["StateMap"], !startedServiceNames.contains("StateMap") {
@@ -152,7 +152,7 @@ public final class StageLinqManager: ObservableObject {
                     device.connectionState = .failed
                     device.errorMessage = "\(error)"
                 }
-                self.log("⚠️ \(device.name): \(error)")
+                self.log("[WARN] \(device.name): \(error)")
 
                 self.netQueue.asyncAfter(deadline: .now() + 5) { [weak self] in
                     guard let self, !self.stopped else { return }
@@ -171,7 +171,7 @@ public final class StageLinqManager: ObservableObject {
                 }
             }
         } catch {
-            log("📊 StateMap desconectado (\(device.name)): \(error)")
+            log(" StateMap desconectado (\(device.name)): \(error)")
         }
     }
 
@@ -184,7 +184,7 @@ public final class StageLinqManager: ObservableObject {
                 }
             }
         } catch {
-            log("🥁 BeatInfo desconectado (\(device.name)): \(error)")
+            log(" BeatInfo desconectado (\(device.name)): \(error)")
         }
     }
 
@@ -251,6 +251,14 @@ public final class StageLinqManager: ObservableObject {
             if let s = value.state { deck.loopEnabled = s }
         case "/Track/KeyLock":
             if let s = value.state { deck.keyLock = s }
+        case "/Track/CuePosition":
+            if let v = value.value { deck.cuePosition = v }
+        case "/Track/CurrentLoopInPosition":
+            if let v = value.value { deck.loopInPosition = v }
+        case "/Track/CurrentLoopOutPosition":
+            if let v = value.value { deck.loopOutPosition = v }
+        case "/Track/CurrentLoopSizeInBeats":
+            if let v = value.value { deck.loopSizeBeats = v }
         default:
             break // el resto de las ~40 rutas suscritas se reciben pero no se
                    // muestran en la interfaz principal (loops rápidos, sample rate, etc.)

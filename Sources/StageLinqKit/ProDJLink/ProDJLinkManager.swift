@@ -109,7 +109,7 @@ public final class ProDJLinkManager: ObservableObject {
         do {
             let socket = try UDPSocket(listenPort: DJLink.keepAlivePort)
             keepAliveSocket = socket
-            log("👂 Pro DJ Link: escuchando presencia en UDP :\(DJLink.keepAlivePort)")
+            log(" Pro DJ Link: escuchando presencia en UDP :\(DJLink.keepAlivePort)")
 
             while !stopped {
                 guard let (data, _) = socket.receive() else { continue }
@@ -120,7 +120,7 @@ public final class ProDJLinkManager: ObservableObject {
             }
             socket.close()
         } catch {
-            log("❌ Pro DJ Link: no se pudo escuchar en UDP \(DJLink.keepAlivePort): \(error). ¿rekordbox abierto?")
+            log(" Pro DJ Link: no se pudo escuchar en UDP \(DJLink.keepAlivePort): \(error). ¿rekordbox abierto?")
         }
     }
 
@@ -139,18 +139,18 @@ public final class ProDJLinkManager: ObservableObject {
             self.devices.append(device)
             self.devices.sort { $0.playerNumber < $1.playerNumber }
         }
-        log("🎚 CDJ detectado: \(announce.model) · reproductor \(announce.playerNumber) @ \(announce.ip)")
+        log(" CDJ detectado: \(announce.model) · reproductor \(announce.playerNumber) @ \(announce.ip)")
     }
 
     // MARK: - 2. Anuncio como CDJ virtual (imprescindible)
 
     private func runVirtualCDJAnnounce() {
         guard let sock = try? UDPSocket(listenPort: nil) else {
-            log("⚠️ Pro DJ Link: no se pudo crear el socket de anuncio")
+            log("⚠ Pro DJ Link: no se pudo crear el socket de anuncio")
             return
         }
         let ipBytes = NetworkInfo.localIPv4Bytes()
-        log("📡 Pro DJ Link: anunciándonos como reproductor virtual \(DJLink.virtualPlayerNumber) desde \(NetworkInfo.describe(ipBytes))")
+        log(" Pro DJ Link: anunciándonos como reproductor virtual \(DJLink.virtualPlayerNumber) desde \(NetworkInfo.describe(ipBytes))")
 
         let packet = DJLinkKeepAlive.buildVirtualCDJ(
             playerNumber: DJLink.virtualPlayerNumber,
@@ -172,7 +172,7 @@ public final class ProDJLinkManager: ObservableObject {
         do {
             let socket = try UDPSocket(listenPort: DJLink.statusPort)
             statusSocket = socket
-            log("📊 Pro DJ Link: escuchando estado en UDP :\(DJLink.statusPort)")
+            log(" Pro DJ Link: escuchando estado en UDP :\(DJLink.statusPort)")
 
             while !stopped {
                 guard let (data, ip) = socket.receive() else { continue }
@@ -181,7 +181,7 @@ public final class ProDJLinkManager: ObservableObject {
             }
             socket.close()
         } catch {
-            log("❌ Pro DJ Link: no se pudo escuchar en UDP \(DJLink.statusPort): \(error)")
+            log(" Pro DJ Link: no se pudo escuchar en UDP \(DJLink.statusPort): \(error)")
         }
     }
 
@@ -191,7 +191,7 @@ public final class ProDJLinkManager: ObservableObject {
         do {
             let socket = try UDPSocket(listenPort: DJLink.beatPort)
             beatSocket = socket
-            log("🥁 Pro DJ Link: escuchando beats en UDP :\(DJLink.beatPort)")
+            log(" Pro DJ Link: escuchando beats en UDP :\(DJLink.beatPort)")
 
             while !stopped {
                 guard let (data, ip) = socket.receive() else { continue }
@@ -205,7 +205,7 @@ public final class ProDJLinkManager: ObservableObject {
             }
             socket.close()
         } catch {
-            log("❌ Pro DJ Link: no se pudo escuchar en UDP \(DJLink.beatPort): \(error)")
+            log(" Pro DJ Link: no se pudo escuchar en UDP \(DJLink.beatPort): \(error)")
         }
     }
 
@@ -251,7 +251,7 @@ public final class ProDJLinkManager: ObservableObject {
                 self.devices.append(created)
                 self.devices.sort { $0.playerNumber < $1.playerNumber }
             }
-            log("🎚 CDJ con estado activo: \(status.model) · reproductor \(status.playerNumber) @ \(ip)")
+            log(" CDJ con estado activo: \(status.model) · reproductor \(status.playerNumber) @ \(ip)")
             device = created
         }
 

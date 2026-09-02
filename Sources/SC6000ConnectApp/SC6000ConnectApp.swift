@@ -9,6 +9,7 @@ struct SC6000ConnectApp: App {
     @StateObject private var manager = StageLinqManager()
     @StateObject private var proDJLink = ProDJLinkManager()
     @StateObject private var outputs = OutputController()
+    @StateObject private var artwork = ArtworkFetcher()
 
     var body: some Scene {
         WindowGroup("SC6000 Connect") {
@@ -16,6 +17,7 @@ struct SC6000ConnectApp: App {
                 .environmentObject(manager)
                 .environmentObject(proDJLink)
                 .environmentObject(outputs)
+                .environmentObject(artwork)
                 .frame(minWidth: 980, minHeight: 640)
                 .preferredColorScheme(.dark)
                 .onAppear {

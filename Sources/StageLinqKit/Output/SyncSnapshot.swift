@@ -11,15 +11,21 @@ public struct SyncSnapshot {
     public var beatCount: Int      // beat absoluto dentro de la pista
     public var playhead: Double?   // segundos; nil si el protocolo no lo da
     public var isPlaying: Bool
-    public var sourceLabel: String
+    public var sourceLabel:  String
+    public var trackTitle:   String?   // nil si el protocolo no lo da
+    public var trackArtist:  String?
 
-    public init(bpm: Double, beatInBar: Int, beatCount: Int, playhead: Double?, isPlaying: Bool, sourceLabel: String) {
-        self.bpm = bpm
-        self.beatInBar = beatInBar
-        self.beatCount = beatCount
-        self.playhead = playhead
-        self.isPlaying = isPlaying
+    public init(bpm: Double, beatInBar: Int, beatCount: Int, playhead: Double?,
+                isPlaying: Bool, sourceLabel: String,
+                trackTitle: String? = nil, trackArtist: String? = nil) {
+        self.bpm         = bpm
+        self.beatInBar   = beatInBar
+        self.beatCount   = beatCount
+        self.playhead    = playhead
+        self.isPlaying   = isPlaying
         self.sourceLabel = sourceLabel
+        self.trackTitle  = trackTitle
+        self.trackArtist = trackArtist
     }
 
     public static let idle = SyncSnapshot(bpm: 0, beatInBar: 0, beatCount: 0, playhead: nil, isPlaying: false, sourceLabel: "—")

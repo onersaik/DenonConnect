@@ -119,11 +119,7 @@ struct ContentView: View {
                 HStack(spacing: 8) {
                     SourceCount(label: "DENON",   count: manager.devices.count,   color: Theme.accent)
                     SourceCount(label: "PIONEER", count: proDJLink.devices.count, color: Theme.cyan)
-                    if mode == .auto {
-                        Text("auto → \(effectiveMode.rawValue.lowercased())")
-                            .font(.system(size: 9))
-                            .foregroundColor(Theme.textTertiary)
-                    }
+
                 }
             }
 
@@ -143,22 +139,16 @@ struct ContentView: View {
             .frame(width: 260)
             .labelsHidden()
 
-            // Botón SALIDAS
+            // Botón Ajustes
             Button { showOutputs = true } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: "antenna.radiowaves.left.and.right")
-                        .font(.system(size: 11))
-                    Text("SALIDAS")
-                        .font(.system(size: 10, weight: .bold))
-                        .tracking(0.5)
-                }
-                .foregroundColor(outputsActive ? Theme.ledGreen : Theme.textSecondary)
-                .padding(.horizontal, 9)
-                .padding(.vertical, 6)
-                .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.06)))
+                Image(systemName: "gearshape.fill")
+                    .font(.system(size: 14))
+                    .foregroundColor(outputsActive ? Theme.ledGreen : Theme.textSecondary)
+                    .padding(7)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.06)))
             }
             .buttonStyle(.plain)
-            .help("Enviar tempo a Resolume por OSC y timecode SMPTE por audio")
+            .help("Ajustes: salidas de timecode, OSC, servidor web, historial")
 
             // Log
             Button { showLog.toggle() } label: {
@@ -233,12 +223,10 @@ private struct EmptyStateView: View {
 private struct CreditsFooter: View {
     var body: some View {
         HStack(spacing: 10) {
-            Text("DJ SAIK")
+            Text("SC6000 CONNECT")
                 .font(.system(size: 10, weight: .bold)).tracking(1.2).foregroundColor(Theme.accent)
-            Text("entikrecords.com")
-                .font(.system(size: 10)).foregroundColor(Theme.textSecondary)
             Spacer()
-            Text("StageLinq · Pro DJ Link — no oficial")
+            Text("desarrollo integro por entikrecords.com")
                 .font(.system(size: 9)).foregroundColor(Theme.textTertiary)
         }
         .padding(.horizontal, 18).padding(.vertical, 8)
@@ -265,11 +253,17 @@ struct DenonDeckRow: View {
     let device: StageLinqDevice
     var isLarge: Bool = true
     @EnvironmentObject var outputs: OutputController
+    @EnvironmentObject var artwork: ArtworkFetcher
 
     var body: some View {
-        let display   = DeckDisplayBuilder.row(for: deck, device: device)
+        var display   = DeckDisplayBuilder.row(for: deck, device: device)
         let isLTC     = outputs.ltcSourceDeckID == display.id
-        PlayerDeckRow(
+        // Solicitar portada y adjuntarla si está en caché
+        if !deck.trackTitle.isEmpty || !deck.trackArtist.isEmpty {
+            artwork.fetch(artist: deck.trackArtist, title: deck.trackTitle)
+            display.artworkImage = artwork.artwork(artist: deck.trackArtist, title: deck.trackTitle)
+        }
+        return PlayerDeckRow(
             deck: display,
             isLarge: isLarge,
             isLTCSource: isLTC,
@@ -305,6 +299,7 @@ enum DeckDisplayBuilder {
         let deviceName = device.name.isEmpty ? device.ip : device.name
         let progress   = deck.beatProgress
         let elapsed: Double? = progress.map { $0 * deck.trackLength }
+        let len: Double? = deck.trackLength > 0 ? deck.trackLength : nil
 
         return DeckDisplay(
             id:           "denon-\(device.id)-\(deck.id)",
@@ -326,7 +321,10 @@ enum DeckDisplayBuilder {
             elapsed:      elapsed,
             trackLength:  deck.trackLength > 0 ? deck.trackLength : nil,
             progress:     progress,
-            accent:       Theme.deckAccent(deck.id - 1)
+            accent:       Theme.deckAccent(deck.id - 1),
+            cuePositionFraction: len.flatMap { deck.cuePosition >= 0 ? deck.cuePosition / $0 : nil },
+            loopInFraction:  len.flatMap { deck.loopEnabled && deck.loopInPosition >= 0  ? deck.loopInPosition  / $0 : nil },
+            loopOutFraction: len.flatMap { deck.loopEnabled && deck.loopOutPosition >= 0 ? deck.loopOutPosition / $0 : nil }
         )
     }
 
@@ -351,7 +349,10 @@ enum DeckDisplayBuilder {
             elapsed:      device.hasPosition ? device.playhead : nil,
             trackLength:  device.hasPosition && device.trackLength > 0 ? device.trackLength : nil,
             progress:     device.hasPosition ? device.progress : nil,
-            accent:       Theme.deckAccent((device.playerNumber - 1 + 4) % 4)
+            accent:       Theme.deckAccent((device.playerNumber - 1 + 4) % 4),
+            cuePositionFraction: nil,
+            loopInFraction:  nil,
+            loopOutFraction: nil
         )
     }
 

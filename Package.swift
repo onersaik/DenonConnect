@@ -7,12 +7,20 @@ let package = Package(
     targets: [
         .target(
             name: "StageLinqKit",
-            path: "Sources/StageLinqKit"
+            path: "Sources/StageLinqKit",
+            linkerSettings: [
+                .linkedFramework("CoreMIDI"),
+                .linkedFramework("CoreAudio"),
+                .linkedFramework("AVFoundation"),
+            ]
         ),
         .executableTarget(
             name: "SC6000ConnectApp",
             dependencies: ["StageLinqKit"],
-            path: "Sources/SC6000ConnectApp"
+            path: "Sources/SC6000ConnectApp",
+            linkerSettings: [
+                .linkedFramework("Network"),
+            ]
         ),
         // App aparte que simula reproductores en la red, para probar sin equipo.
         .executableTarget(

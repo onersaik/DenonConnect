@@ -201,7 +201,7 @@ public final class LTCGenerator {
         } else {
             deviceDesc = "dispositivo por defecto"
         }
-        log("🎬 SMPTE LTC en marcha — \(Int(frameRate.rawValue)) fps, \(Int(rate)) Hz, \(deviceDesc)")
+        log(" SMPTE LTC en marcha — \(Int(frameRate.rawValue)) fps, \(Int(rate)) Hz, \(deviceDesc)")
     }
 
     public func stop() {
@@ -214,7 +214,7 @@ public final class LTCGenerator {
             engine.detach(node)
             sourceNode = nil
         }
-        log("⏹ SMPTE LTC detenido")
+        log(" SMPTE LTC detenido")
     }
 
     // MARK: Timecode legible

@@ -24,6 +24,10 @@ public final class DeckState: ObservableObject, Identifiable {
     @Published public var playState: PlayState = .stopped
     @Published public var songLoaded: Bool = false
     @Published public var loopEnabled: Bool = false
+    @Published public var cuePosition: Double = -1       // segundos; -1 = sin cue
+    @Published public var loopInPosition: Double = -1    // segundos; -1 = sin loop
+    @Published public var loopOutPosition: Double = -1
+    @Published public var loopSizeBeats: Double = 0
     @Published public var keyLock: Bool = false
     @Published public var trackLength: Double = 0 // segundos
     @Published public var volume: Double = 0
