@@ -153,12 +153,12 @@ struct WaveformView: View {
         if bpm > 20 {
             beat = t * bpm / 60.0
         } else {
-            // Sin BPM real no inventamos 120: fase por tiempo, estable por seed.
             beat = t * 2.0
         }
-        let bass = bandHeight(beat: beat, seed: trackSeed, freqA: 0.50, freqB: 1.03, phaseA: 0.017, phaseB: 0.031)
-        let mid  = bandHeight(beat: beat, seed: trackSeed, freqA: 2.13, freqB: 3.07, phaseA: 0.011, phaseB: 0.019)
-        let hi   = bandHeight(beat: beat, seed: trackSeed, freqA: 4.27, freqB: 6.11, phaseA: 0.007, phaseB: 0.009)
+        // Procedural: compute musical energy then apply CDJ-style color character
+        // via the same rgbFromPeak path, so colors match tracks with real peaks.
+        let energy = bandHeight(beat: beat, seed: trackSeed, freqA: 0.35, freqB: 0.71, phaseA: 0.017, phaseB: 0.031)
+        let (bass, mid, hi) = rgbFromPeak(Float(energy), time: t)
         if durationSeconds > 0 && (t < 0 || t > durationSeconds) {
             return (bass * 0.12, mid * 0.12, hi * 0.12)
         }
@@ -253,8 +253,8 @@ struct WaveformView: View {
         let isDownbeat = barWrapped < slop || barWrapped > (4 - slop)
         let isCurrent = beatInBar > 0 && Int(barWrapped) + 1 == beatInBar && isDownbeat
         ctx.fill(
-            Path(CGRect(x: x, y: 0, width: 1, height: size.height)),
-            with: .color(Theme.wfBass.opacity(isCurrent ? 0.50 : (isDownbeat ? 0.34 : 0.10)))
+            Path(CGRect(x: x, y: 0, width: isDownbeat ? 1.5 : 1, height: size.height)),
+            with: .color(Color.white.opacity(isCurrent ? 0.82 : (isDownbeat ? 0.48 : 0.15)))
         )
     }
 

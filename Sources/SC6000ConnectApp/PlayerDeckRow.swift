@@ -294,25 +294,28 @@ struct PlayerDeckRow: View {
 
     private var smallBody: some View {
         VStack(spacing: 0) {
-            HStack(alignment: .top, spacing: 8) {
-                VStack(spacing: 3) {
-                    Text(deck.kindLabel)
-                        .font(.system(size: 6, weight: .bold))
-                        .tracking(0.8)
-                        .foregroundColor(Theme.textTertiary)
+            // ── Header row ──────────────────────────────────────────────
+            HStack(spacing: 0) {
+                // Deck tag strip
+                VStack(spacing: 1) {
                     Text(deck.deckTag)
-                        .font(.system(size: 14, weight: .bold, design: .monospaced))
+                        .font(.system(size: 13, weight: .bold, design: .monospaced))
                         .foregroundColor(Theme.textPrimary)
-                        .frame(width: 26, height: 20)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 2)
-                                .stroke(deck.isPlaying ? deck.accent : Theme.rowDivider, lineWidth: 1)
-                        )
+                    Image(systemName: deck.isPlaying ? "play.fill" : "pause.fill")
+                        .font(.system(size: 7))
+                        .foregroundColor(deck.isPlaying ? Theme.ledGreen : Theme.textTertiary)
+                }
+                .frame(width: 32)
+                .frame(maxHeight: .infinity)
+                .background(Theme.strip)
+                .overlay(alignment: .trailing) {
+                    Rectangle().fill(Theme.rowDivider).frame(width: 1)
                 }
 
+                // Title + artist
                 VStack(alignment: .leading, spacing: 1) {
                     Text(titleText)
-                        .font(.system(size: 13, weight: .bold))
+                        .font(.system(size: 12, weight: .bold))
                         .foregroundColor(deck.loaded ? Theme.ledGreen : Theme.textTertiary)
                         .lineLimit(1)
                     if !deck.artist.isEmpty {
@@ -322,54 +325,56 @@ struct PlayerDeckRow: View {
                             .lineLimit(1)
                     }
                 }
+                .padding(.horizontal, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-                Spacer(minLength: 4)
+                // Elapsed time
+                Text(formatMS(deck.elapsed))
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundColor(deck.loaded ? Theme.ledGreen : Theme.ledDim)
+                    .padding(.trailing, 8)
 
+                // BPM
                 VStack(alignment: .trailing, spacing: 0) {
                     Text(bpmText)
-                        .font(.system(size: 18, weight: .bold, design: .monospaced))
+                        .font(.system(size: 16, weight: .bold, design: .monospaced))
                         .foregroundColor(deck.bpm > 0 ? Theme.ledGreen : Theme.ledDim)
                     Text("BPM")
-                        .font(.system(size: 7, weight: .bold))
+                        .font(.system(size: 6, weight: .bold))
                         .foregroundColor(Theme.textTertiary)
                 }
-            }
-            .padding(.horizontal, 8)
-            .padding(.top, 6)
-            .padding(.bottom, 4)
+                .padding(.trailing, 8)
 
-            WaveformView(
-                progress:    deck.progress,
-                trackLength: deck.trackLength,
-                bpm:         deck.bpm,
-                beatInBar:   deck.beatInBar,
-                isPlaying:   deck.isPlaying,
-                accent:      deck.accent,
-                trackSeed:   deck.trackSeed,
-                peaks: deck.peaks,
-                cuePositionFraction: deck.cuePositionFraction,
-                loopInFraction:  deck.loopInFraction,
-                loopOutFraction: deck.loopOutFraction,
-                mode: .scrolling,
-                windowSeconds: isHot ? 8 : 24
-            )
-            .id(deck.id)
-            .frame(height: isHot ? 54 : 36)
-            .opacity(deck.loaded && (deck.progress != nil || !deck.peaks.isEmpty) ? 1 : 0.28)
-            .transaction { $0.animation = nil }
-
-            HStack(spacing: 8) {
-                Text(formatMS(deck.elapsed))
-                    .font(.system(size: 12, weight: .bold, design: .monospaced))
-                    .foregroundColor(deck.loaded ? Theme.ledGreen : Theme.ledDim)
-                beatGrid(large: false)
-                Spacer()
-                if isLTCSource { LEDTag(text: "LTC", color: Theme.purple) }
-                masterButton
-                ltcButton
+                // Tags + action buttons
+                HStack(spacing: 4) {
+                    if isLTCSource { LEDTag(text: "LTC", color: Theme.purple) }
+                    masterButton
+                    ltcButton
+                }
+                .padding(.trailing, 6)
             }
-            .padding(.horizontal, 8)
             .padding(.vertical, 5)
+            .background(Theme.deckFill)
+
+            // ── Overview waveform ────────────────────────────────────────
+            WaveformView(
+                progress:            deck.progress,
+                trackLength:         deck.trackLength,
+                bpm:                 deck.bpm,
+                beatInBar:           deck.beatInBar,
+                isPlaying:           deck.isPlaying,
+                accent:              deck.accent,
+                trackSeed:           deck.trackSeed,
+                peaks:               deck.peaks,
+                cuePositionFraction: deck.cuePositionFraction,
+                loopInFraction:      deck.loopInFraction,
+                loopOutFraction:     deck.loopOutFraction,
+                mode:                .overview
+            )
+            .id(deck.id + "-ov")
+            .frame(height: 52)
+            .opacity(deck.loaded && (deck.progress != nil || !deck.peaks.isEmpty) ? 1 : 0.22)
+            .transaction { $0.animation = nil }
         }
         .background(Theme.deckFill)
         .overlay(alignment: .leading) {
@@ -377,9 +382,9 @@ struct PlayerDeckRow: View {
                 .fill(deck.isPlaying ? deck.accent : Color.clear)
                 .frame(width: 2)
         }
-        .overlay(
-            Rectangle().stroke(Theme.rowDivider, lineWidth: 1)
-        )
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Theme.rowDivider).frame(height: 1)
+        }
     }
 
     // ═══════════════════════════════════════

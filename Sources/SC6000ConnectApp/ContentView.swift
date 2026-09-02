@@ -147,13 +147,22 @@ struct ContentView: View {
                     .transaction { $0.animation = nil }
                 }
             } else {
+                // Vista compact: master/hot en grande arriba, resto en grid 2 col abajo
+                let masterID = outputs.hotDeckID ?? outputs.ltcFollowedDeckID
+                let masterEntry = entries.first(where: { masterID != nil && $0.id == masterID }) ?? entries.first
+                let otherEntries = entries.filter { $0.id != masterEntry?.id }
                 ScrollView {
-                    LazyVGrid(
-                        columns: [GridItem(.flexible(), spacing: 0), GridItem(.flexible(), spacing: 0)],
-                        spacing: 0
-                    ) {
-                        ForEach(entries) { entry in
-                            deckRow(entry, isLarge: false)
+                    VStack(spacing: 0) {
+                        if let master = masterEntry {
+                            deckRow(master, isLarge: true)
+                        }
+                        if !otherEntries.isEmpty {
+                            Rectangle().fill(Theme.rowDivider).frame(height: 2)
+                            LazyVStack(spacing: 0) {
+                                ForEach(otherEntries) { entry in
+                                    deckRow(entry, isLarge: false)
+                                }
+                            }
                         }
                     }
                     .transaction { $0.animation = nil }
