@@ -1,42 +1,59 @@
 swift-driver version: 1.90.11.1 Apple Swift version 5.10 (swiftlang-5.10.0.13 clang-1500.3.9.4)
 Target: arm64-apple-macosx14.0
 Building for debugging...
-[0/7] Write sources
-[2/7] Write SC6000ConnectApp-entitlement.plist
-[3/7] Write swift-version-76B232A4806BA581.txt
-[5/18] Emitting module StageLinqKit
-[6/22] Compiling StageLinqKit StageLinqManager.swift
-[7/22] Compiling StageLinqKit StateMapService.swift
-[8/22] Compiling StageLinqKit StatePaths.swift
-[9/22] Compiling StageLinqKit StateValue.swift
-[10/22] Compiling StageLinqKit BeatInfoService.swift
-[11/22] Compiling StageLinqKit ByteIO.swift
-[12/22] Compiling StageLinqKit Models.swift
-[13/22] Compiling StageLinqKit NetworkDevice.swift
-[14/22] Compiling StageLinqKit DJLinkProtocol.swift
-[15/22] Compiling StageLinqKit NetworkInfo.swift
-[16/22] Compiling StageLinqKit ProDJLinkManager.swift
-[17/22] Compiling StageLinqKit Protocol.swift
-[18/22] Compiling StageLinqKit ServiceConnection.swift
-[19/22] Compiling StageLinqKit Sockets.swift
-[20/27] Compiling SC6000ConnectApp PlayerDeckRow.swift
-[21/27] Compiling SC6000ConnectApp SC6000ConnectApp.swift
-[22/27] Emitting module SC6000ConnectApp
-[23/27] Compiling SC6000ConnectApp ContentView.swift
-[24/27] Compiling SC6000ConnectApp LogView.swift
-[25/28] Compiling SC6000ConnectApp Theme.swift
-[25/28] Write Objects.LinkFileList
-[26/28] Linking SC6000ConnectApp
-[27/28] Applying SC6000ConnectApp
-Build complete! (13.81s)
+[0/12] Write sources
+[0/12] Write SC6000ConnectApp-entitlement.plist
+[3/12] Write DJSimulatorApp-entitlement.plist
+[5/12] Write swift-version-76B232A4806BA581.txt
+[7/27] Emitting module StageLinqKit
+[8/33] Compiling StageLinqKit PioneerSimulator.swift
+[9/33] Compiling StageLinqKit Sockets.swift
+[10/33] Compiling StageLinqKit StageLinqManager.swift
+[11/33] Compiling StageLinqKit StateMapService.swift
+[12/33] Compiling StageLinqKit StatePaths.swift
+[13/33] Compiling StageLinqKit StateValue.swift
+[14/33] Compiling StageLinqKit SyncSnapshot.swift
+[15/33] Compiling StageLinqKit DJLinkProtocol.swift
+[16/33] Compiling StageLinqKit NetworkInfo.swift
+[17/33] Compiling StageLinqKit ProDJLinkManager.swift
+[18/33] Compiling StageLinqKit Protocol.swift
+[19/33] Compiling StageLinqKit ServiceConnection.swift
+[20/33] Compiling StageLinqKit DenonSimulator.swift
+[21/33] Compiling StageLinqKit BeatInfoService.swift
+[22/33] Compiling StageLinqKit ByteIO.swift
+[23/33] Compiling StageLinqKit Models.swift
+[24/33] Compiling StageLinqKit NetworkDevice.swift
+[25/33] Compiling StageLinqKit LTCGenerator.swift
+[26/33] Compiling StageLinqKit OSCClient.swift
+[27/33] Compiling StageLinqKit ResolumeBridge.swift
+[28/41] Emitting module DJSimulatorApp
+[29/41] Compiling DJSimulatorApp DJSimulatorApp.swift
+[29/41] Write Objects.LinkFileList
+[31/41] Compiling SC6000ConnectApp OutputsView.swift
+[32/41] Compiling SC6000ConnectApp PlayerDeckRow.swift
+[33/43] Emitting module SC6000ConnectApp
+[34/43] Compiling SC6000ConnectApp ContentView.swift
+[35/43] Compiling SC6000ConnectApp LogView.swift
+[36/43] Compiling SC6000ConnectApp OutputController.swift
+[37/43] Compiling SC6000ConnectApp SC6000ConnectApp.swift
+[38/43] Compiling SC6000ConnectApp Theme.swift
+[38/43] Write Objects.LinkFileList
+[39/43] Linking DJSimulatorApp
+[40/43] Applying DJSimulatorApp
+[41/43] Linking SC6000ConnectApp
+[42/43] Applying SC6000ConnectApp
+Build complete! (10.28s)
 === RELEASE ===
 Building for production...
-[0/5] Write sources
-[2/5] Write swift-version-76B232A4806BA581.txt
-[4/6] Compiling StageLinqKit BeatInfoService.swift
-[5/7] Compiling SC6000ConnectApp ContentView.swift
-[5/7] Write Objects.LinkFileList
-[6/7] Linking SC6000ConnectApp
-Build complete! (11.71s)
+[0/8] Write sources
+[3/8] Write swift-version-76B232A4806BA581.txt
+[5/9] Compiling StageLinqKit BeatInfoService.swift
+[6/11] Compiling DJSimulatorApp DJSimulatorApp.swift
+[6/11] Write Objects.LinkFileList
+[7/11] Linking DJSimulatorApp
+[9/11] Compiling SC6000ConnectApp ContentView.swift
+[9/11] Write Objects.LinkFileList
+[10/11] Linking SC6000ConnectApp
+Build complete! (9.58s)
 
-=== resultado: build=success release=success sha=3f2a0105b6e007e6188b33a68b8815dc602143c1 ===
+=== resultado: build=success release=success sha=4145ea52d19620d72236d76099335bf15c7f1330 ===
