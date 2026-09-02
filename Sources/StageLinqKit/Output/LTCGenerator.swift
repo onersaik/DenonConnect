@@ -56,13 +56,17 @@ public final class LTCGenerator {
 
     // MARK: Privado
 
-    private let engine     = AVAudioEngine()
+    private var engine     = AVAudioEngine()
     private var sourceNode: AVAudioSourceNode?
     private let log:        (String) -> Void
+    private let name:       String
     private let stateLock  = NSLock()
 
     private var currentFrame:       Int    = 0
     private var running             = false
+    private var paused              = true
+    /// Segundos de playhead anclados por el tick. No es un reloj de pared.
+    private var playheadSeconds:    Double = 0
     private var bitsOfFrame:        [UInt8] = []
     private var bitIndex:           Int    = 0
     private var halfBitPhase:       Int    = 0
@@ -70,9 +74,12 @@ public final class LTCGenerator {
     private var polarity:           Float  = 1
     private var sampleRate:         Double = 48000
 
-    public init(log: @escaping (String) -> Void = { _ in }) {
+    public init(name: String = "LTC", log: @escaping (String) -> Void = { _ in }) {
+        self.name = name
         self.log = log
     }
+
+    deinit { stop() }
 
     // MARK: Estado
 
@@ -155,16 +162,47 @@ public final class LTCGenerator {
     // MARK: Control
 
     public func seek(toSeconds seconds: Double) {
+        applyPlayhead(seconds: seconds, playing: nil)
+    }
+
+    /// El LTC es el playhead de la pista: 0 → 00:00:00:00, seek/jog/cue
+    /// clavan el frame en el acto. `playing == false` congela (silencio).
+    /// Solo se reinicia el bitstream en un salto de más de un frame.
+    public func applyPlayhead(seconds: Double, playing: Bool? = nil) {
+        let safe = seconds.isFinite ? max(0, seconds) : 0
         stateLock.lock()
-        currentFrame = max(0, Int(seconds * frameRate.rawValue))
-        loadFrameBitsLocked()
+        let wasPlaying = !paused
+        if let playing { paused = !playing }
+        let nowPlaying = !paused
+        let frame = Self.frameNumber(seconds: safe, fps: frameRate.rawValue)
+        let delta = frame - currentFrame
+        let playStateChanged = wasPlaying != nowPlaying
+        // Solo hard-reset en primera carga, cambio play/pause, o salto >2 frames.
+        // Mientras reproduce con delta pequeno, el reloj de audio avanza sin resetear.
+        let hardReset = bitsOfFrame.isEmpty || playStateChanged || abs(delta) > 2
+        if hardReset {
+            playheadSeconds = safe
+            currentFrame = max(0, frame)
+            loadFrameBitsLocked()
+        }
+        stateLock.unlock()
+    }
+
+    /// Con la pista en pausa el LTC se congela en el frame actual (silencio,
+    /// sin avanzar). Al reanudar sigue desde el playhead.
+    public func setPaused(_ value: Bool) {
+        stateLock.lock()
+        paused = value
         stateLock.unlock()
     }
 
     public func start() throws {
         stateLock.lock()
-        if running { stateLock.unlock(); return }
+        let already = running
         stateLock.unlock()
+        if already { stop() }
+
+        engine = AVAudioEngine()
 
         // Seleccionar dispositivo si el usuario eligió uno específico
         if let deviceID = outputDeviceID, deviceID != 0 {
@@ -176,8 +214,13 @@ public final class LTCGenerator {
 
         stateLock.lock()
         sampleRate = rate
-        loadFrameBitsLocked()
+        // No resetear a 00:00:00:00: applyPlayhead ya dejó el frame del deck.
+        if bitsOfFrame.isEmpty {
+            currentFrame = Self.frameNumber(seconds: playheadSeconds, fps: frameRate.rawValue)
+            loadFrameBitsLocked()
+        }
         running = true
+        paused = true
         stateLock.unlock()
 
         let format = AVAudioFormat(standardFormatWithSampleRate: rate, channels: 2)
@@ -201,36 +244,59 @@ public final class LTCGenerator {
         } else {
             deviceDesc = "dispositivo por defecto"
         }
-        log(" SMPTE LTC en marcha — \(Int(frameRate.rawValue)) fps, \(Int(rate)) Hz, \(deviceDesc)")
+        log("SMPTE LTC [\(name)] en marcha — \(Int(frameRate.rawValue)) fps, \(Int(rate)) Hz, \(deviceDesc)")
     }
 
+    /// Corta el engine, el AU y el render. No deja silencio a 00:00:00:00:
+    /// deja de emitir por completo.
     public func stop() {
         stateLock.lock()
+        let wasRunning = running
         running = false
+        paused = true
+        bitsOfFrame = []
+        bitIndex = 0
+        halfBitPhase = 0
+        samplesIntoHalfBit = 0
         stateLock.unlock()
 
-        engine.stop()
+        engine.mainMixerNode.outputVolume = 0
         if let node = sourceNode {
+            engine.disconnectNodeOutput(node)
             engine.detach(node)
             sourceNode = nil
         }
-        log(" SMPTE LTC detenido")
+        engine.stop()
+        engine.reset()
+        if wasRunning { log("SMPTE LTC [\(name)] detenido") }
     }
 
     // MARK: Timecode legible
 
     public func currentPositionSeconds() -> Double {
         stateLock.lock(); defer { stateLock.unlock() }
-        return Double(currentFrame) / frameRate.rawValue
+        return playheadSeconds
     }
 
     public func currentTimecodeText() -> String {
         stateLock.lock()
-        let frame = currentFrame
+        let seconds = playheadSeconds
+        let fps = frameRate.rawValue
         stateLock.unlock()
-        let fps = Int(frameRate.rawValue)
-        let frames = frame % fps
-        let totalSec = frame / fps
+        return Self.timecodeText(seconds: seconds, fps: fps)
+    }
+
+    public static func frameNumber(seconds: Double, fps: Double) -> Int {
+        let safe = seconds.isFinite ? max(0, seconds) : 0
+        let rate = fps > 0 ? fps : 25
+        return max(0, Int(safe * rate))
+    }
+
+    public static func timecodeText(seconds: Double, fps: Double) -> String {
+        let n = Int(fps > 0 ? fps : 25)
+        let frame = frameNumber(seconds: seconds, fps: Double(n))
+        let frames = n > 0 ? frame % n : 0
+        let totalSec = n > 0 ? frame / n : 0
         return String(format: "%02d:%02d:%02d:%02d",
                       (totalSec / 3600) % 24, (totalSec / 60) % 60,
                       totalSec % 60, frames)
@@ -259,6 +325,7 @@ public final class LTCGenerator {
     private func render(into buffers: UnsafeMutableAudioBufferListPointer, frameCount: Int) {
         stateLock.lock()
         let isRunning  = running
+        let isPaused   = paused
         let rate       = sampleRate
         let amplitude  = level
         stateLock.unlock()
@@ -268,13 +335,20 @@ public final class LTCGenerator {
             return
         }
 
+        if isPaused {
+            for buffer in buffers { memset(buffer.mData, 0, Int(buffer.mDataByteSize)) }
+            return
+        }
+
         let bitsPerSecond      = frameRate.rawValue * 80.0
         let samplesPerHalfBit  = rate / (bitsPerSecond * 2.0)
+        let dt = rate > 0 ? 1.0 / rate : 0
         var samples = [Float](repeating: 0, count: frameCount)
 
         stateLock.lock()
         for i in 0..<frameCount {
             samples[i] = polarity * amplitude
+            playheadSeconds += dt
             samplesIntoHalfBit += 1
             if samplesIntoHalfBit >= samplesPerHalfBit {
                 samplesIntoHalfBit -= samplesPerHalfBit
@@ -299,7 +373,7 @@ public final class LTCGenerator {
             halfBitPhase = 0
             bitIndex += 1
             if bitIndex >= bitsOfFrame.count {
-                currentFrame += 1
+                currentFrame = Self.frameNumber(seconds: playheadSeconds, fps: frameRate.rawValue)
                 loadFrameBitsLocked()
             }
         }

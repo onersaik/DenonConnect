@@ -28,7 +28,7 @@ struct LogView: View {
                 .padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .background(Color.black.opacity(0.4))
+            .background(Color.black)
             .onChange(of: lines.count) { _ in
                 if let last = lines.indices.last {
                     proxy.scrollTo(last, anchor: .bottom)

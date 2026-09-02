@@ -54,4 +54,34 @@ public enum NetworkInfo {
         guard bytes.count == 4 else { return "0.0.0.0" }
         return "\(bytes[0]).\(bytes[1]).\(bytes[2]).\(bytes[3])"
     }
+
+    /// Todas las IPv4 locales (interfaces activas + loopback). Sirve para
+    /// reconocer el CDJ virtual y el simulador TEST en este mismo Mac.
+    public static func localIPv4Addresses() -> Set<String> {
+        var result: Set<String> = ["127.0.0.1"]
+        var ifaddrPtr: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&ifaddrPtr) == 0 else { return result }
+        defer { freeifaddrs(ifaddrPtr) }
+
+        var cursor = ifaddrPtr
+        while let current = cursor {
+            let interface = current.pointee
+            cursor = interface.ifa_next
+            guard let addr = interface.ifa_addr else { continue }
+            guard addr.pointee.sa_family == UInt8(AF_INET) else { continue }
+            let flags = Int32(interface.ifa_flags)
+            guard (flags & IFF_UP) != 0 else { continue }
+
+            let sin = addr.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee }
+            let raw = sin.sin_addr.s_addr
+            let ip = "\(UInt8(raw & 0xff)).\(UInt8((raw >> 8) & 0xff)).\(UInt8((raw >> 16) & 0xff)).\(UInt8((raw >> 24) & 0xff))"
+            if ip != "0.0.0.0" { result.insert(ip) }
+        }
+        return result
+    }
+
+    public static func isLocalIPv4(_ ip: String) -> Bool {
+        guard !ip.isEmpty, ip != "0.0.0.0" else { return false }
+        return localIPv4Addresses().contains(ip)
+    }
 }

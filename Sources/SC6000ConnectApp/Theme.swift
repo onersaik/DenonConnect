@@ -1,24 +1,33 @@
 // Theme.swift
-// Paleta visual coherente con el icono de la app (carbón oscuro + acento naranja).
+// Paleta de monitor DJ: negro profundo, dígitos LED, sin chrome gris de macOS.
 
 import SwiftUI
 
 enum Theme {
-    static let background = Color(red: 0.05, green: 0.05, blue: 0.07)
-    static let panel = Color(red: 0.09, green: 0.09, blue: 0.12)
+    /// Negro de escenario, no gris de ventana.
+    static let background = Color.black
+    static let panel = Color(red: 0.04, green: 0.04, blue: 0.045)
+    static let header = Color.black
+    static let deckFill = Color(red: 0.015, green: 0.015, blue: 0.018)
+    static let strip = Color(red: 0.03, green: 0.03, blue: 0.035)
     static let panelBorder = Color.white.opacity(0.08)
-    static let accent = Color(red: 1.0, green: 0.48, blue: 0.09) // naranja Denon-esque
+    static let rowDivider = Color(white: 0.12)
+    static let accent = Color(red: 1.0, green: 0.48, blue: 0.09)
     static let accentDim = Color(red: 1.0, green: 0.48, blue: 0.09).opacity(0.35)
     static let textPrimary = Color.white
-    static let textSecondary = Color.white.opacity(0.6)
-    static let textTertiary = Color.white.opacity(0.38)
+    static let textSecondary = Color.white.opacity(0.58)
+    static let textTertiary = Color.white.opacity(0.34)
     static let green = Color(red: 0.30, green: 0.85, blue: 0.50)
     static let red = Color(red: 0.95, green: 0.32, blue: 0.32)
     static let yellow = Color(red: 0.98, green: 0.78, blue: 0.30)
     static let purple = Color(red: 0.68, green: 0.55, blue: 0.98)
-    static let cyan = Color(red: 0.35, green: 0.82, blue: 0.90)
-    /// Verde de display de reproductor, para los dígitos LED.
-    static let ledGreen = Color(red: 0.42, green: 1.0, blue: 0.55)
+    static let cyan = Color(red: 0.20, green: 0.78, blue: 0.95)
+    /// Verde Pioneer/CDJ para títulos y dígitos.
+    static let ledGreen = Color(red: 0.38, green: 1.0, blue: 0.48)
+    static let ledDim = Color(red: 0.38, green: 1.0, blue: 0.48).opacity(0.22)
+    static let wfBass = Color(red: 0.95, green: 0.10, blue: 0.10)
+    static let wfMid = Color(red: 0.12, green: 0.95, blue: 0.28)
+    static let wfHigh = Color(red: 0.10, green: 0.88, blue: 1.0)
 
     static func deckAccent(_ index: Int) -> Color {
         switch index {
@@ -31,7 +40,7 @@ enum Theme {
 }
 
 struct PanelBackground: ViewModifier {
-    var cornerRadius: CGFloat = 14
+    var cornerRadius: CGFloat = 4
     func body(content: Content) -> some View {
         content
             .background(
@@ -46,7 +55,7 @@ struct PanelBackground: ViewModifier {
 }
 
 extension View {
-    func panelStyle(cornerRadius: CGFloat = 14) -> some View {
+    func panelStyle(cornerRadius: CGFloat = 4) -> some View {
         modifier(PanelBackground(cornerRadius: cornerRadius))
     }
 }

@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>SC6000 Connect</string>
+    <string>STAGE CONNECT</string>
     <key>CFBundleDisplayName</key>
-    <string>SC6000 Connect</string>
+    <string>STAGE CONNECT</string>
     <key>CFBundleExecutable</key>
     <string>SC6000Connect</string>
     <key>CFBundleIdentifier</key>
@@ -29,6 +29,6 @@
     <!-- macOS pide permiso de red local para descubrir los reproductores.
          Sin esta descripción el sistema puede denegarlo en silencio. -->
     <key>NSLocalNetworkUsageDescription</key>
-    <string>SC6000 Connect necesita la red local para descubrir tus reproductores Denon SC6000 (StageLinq) y Pioneer CDJ (Pro DJ Link).</string>
+    <string>STAGE CONNECT necesita la red local para descubrir tus reproductores Denon SC6000 (StageLinq) y Pioneer CDJ (Pro DJ Link).</string>
 </dict>
 </plist>

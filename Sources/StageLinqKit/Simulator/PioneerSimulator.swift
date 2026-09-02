@@ -2,9 +2,9 @@
 // Simula un CDJ-3000 en la red: emite presencia (50000), estado detallado
 // (50002) y beats con posición absoluta (50001), todo por broadcast UDP.
 //
-// Misma advertencia que el simulador Denon: comparte interpretación del
-// protocolo con el cliente, así que valida la app de punta a punta, no la
-// fidelidad al equipo real.
+// Sin stateProvider (y sin standaloneMode) el reproductor se anuncia en idle:
+// sin pista, sin play, sin reloj inventado. El estado real lo inyecta
+// STAGE CONNECT TEST igual que DenonSimulator.
 
 import Foundation
 
@@ -18,13 +18,22 @@ public final class PioneerSimulator {
     private var stoppedFlag = false
     private var sockets: [UDPSocket] = []
 
-    // Pista simulada
-    private var bpm: Double = 130.0
-    private var pitchPercent: Double = 1.5
-    private var trackLength: Double = 294
+    /// Proveedor de estado externo (mismos decks que Denon). Si está asignado,
+    /// el CDJ refleja el deck 0 (A) de TEST. Sin pista → idle real.
+    public var stateProvider: (() -> [SimDeckState])?
+
+    /// Solo para pruebas aisladas. Por defecto false: no se inventa pista.
+    public var standaloneMode: Bool = false
+
+    private var bpm: Double = 0
+    private var pitchPercent: Double = 0
+    private var trackLength: Double = 0
     private var playhead: Double = 0
-    private var beatInBar: Int = 1
+    private var beatInBar: Int = 0
     private var beatCount: Int = 0
+    private var playing: Bool = false
+    private var loaded: Bool = false
+    private var trackID: UInt32 = 0
 
     public init(playerNumber: UInt8 = 2, model: String = "CDJ-3000", log: @escaping (String) -> Void = { _ in }) {
         self.playerNumber = playerNumber
@@ -36,17 +45,16 @@ public final class PioneerSimulator {
 
     public func start() {
         stateQueue.sync { stoppedFlag = false }
-        queue.async { [weak self] in self?.runClock() }
         queue.async { [weak self] in self?.runKeepAlive() }
         queue.async { [weak self] in self?.runStatus() }
         queue.async { [weak self] in self?.runBeats() }
-        log("🎚 Simulador Pioneer iniciado como «\(model)» (player \(playerNumber))")
+        log("[Pioneer] Simulador Pioneer iniciado como «\(model)» (player \(playerNumber))")
     }
 
     public func stop() {
         stateQueue.sync { stoppedFlag = true }
         for socket in sockets { socket.close() }
-        log("⏹ Simulador Pioneer detenido")
+        log("[Pioneer] Simulador detenido")
     }
 
     private func makeSocket() -> UDPSocket? {
@@ -55,27 +63,61 @@ public final class PioneerSimulator {
         return sock
     }
 
-    private var effectiveBPM: Double {
-        stateQueue.sync { bpm * (1 + pitchPercent / 100.0) }
+    // MARK: Estado vivo (TEST o idle)
+
+    private struct Live {
+        var loaded: Bool
+        var playing: Bool
+        var bpm: Double
+        var pitch: Double
+        var playhead: Double
+        var length: Double
+        var beatCount: Int
+        var beatInBar: Int
+        var trackID: UInt32
+        var isMaster: Bool
     }
 
-    // MARK: Reloj
-
-    private func runClock() {
-        let tick = 0.05
-        while !stopped {
-            stateQueue.sync {
-                let beatsPerSecond = (bpm * (1 + pitchPercent / 100.0)) / 60.0
-                playhead += tick
-                if playhead > trackLength { playhead = 0; beatCount = 0 }
-                let newBeatCount = Int(playhead * beatsPerSecond)
-                if newBeatCount != beatCount {
-                    beatCount = newBeatCount
-                    beatInBar = (beatCount % 4) + 1
-                }
-            }
-            Thread.sleep(forTimeInterval: tick)
+    private func liveState() -> Live {
+        if let provider = stateProvider {
+            let s = provider().first { !$0.title.isEmpty || $0.duration > 0 } ?? SimDeckState()
+            let loaded = !s.title.isEmpty || s.duration > 0
+            let bpm = loaded ? MusicalClock.bpm(s.bpm) : 0
+            let dur = loaded && s.duration > 0 ? s.duration : 0
+            let pos = loaded ? max(0, s.positionSeconds) : 0
+            let beatsPerSec = bpm > 0 ? bpm / 60.0 : 0
+            let beatCount = Int(pos * beatsPerSec)
+            return Live(
+                loaded: loaded,
+                playing: loaded && s.isPlaying,
+                bpm: bpm,
+                pitch: 0,
+                playhead: pos,
+                length: dur,
+                beatCount: beatCount,
+                beatInBar: loaded && beatCount >= 0 ? (beatCount % 4) + 1 : 0,
+                trackID: loaded ? Self.hashTrackID(s.title) : 0,
+                isMaster: loaded && s.isMaster
+            )
         }
+        if standaloneMode {
+            return stateQueue.sync {
+                Live(loaded: loaded, playing: playing, bpm: bpm, pitch: pitchPercent,
+                     playhead: playhead, length: trackLength, beatCount: beatCount,
+                     beatInBar: beatInBar, trackID: trackID, isMaster: playing)
+            }
+        }
+        return Live(loaded: false, playing: false, bpm: 0, pitch: 0, playhead: 0,
+                    length: 0, beatCount: 0, beatInBar: 0, trackID: 0, isMaster: false)
+    }
+
+    private static func hashTrackID(_ title: String) -> UInt32 {
+        var h: UInt32 = 2166136261
+        for b in title.utf8 {
+            h ^= UInt32(b)
+            h &*= 16777619
+        }
+        return h == 0 ? 1 : h
     }
 
     // MARK: Presencia (50000)
@@ -91,7 +133,7 @@ public final class PioneerSimulator {
         )
         while !stopped {
             sock.send(packet, to: "255.255.255.255", port: DJLink.keepAlivePort)
-            Thread.sleep(forTimeInterval: 1.5)
+            Thread.sleep(forTimeInterval: 1.0)
         }
     }
 
@@ -100,46 +142,67 @@ public final class PioneerSimulator {
     private func runStatus() {
         guard let sock = makeSocket() else { return }
         while !stopped {
-            sock.send(buildStatusPacket(), to: "255.255.255.255", port: DJLink.statusPort)
-            Thread.sleep(forTimeInterval: 0.2)
+            let live = liveState()
+            if live.loaded {
+                sock.send(buildStatusPacket(live), to: "255.255.255.255", port: DJLink.statusPort)
+                Thread.sleep(forTimeInterval: 0.2)
+            } else {
+                Thread.sleep(forTimeInterval: 0.1)
+            }
         }
     }
 
-    /// Construye un paquete de estado con los mismos offsets que interpreta la app.
-    private func buildStatusPacket() -> Data {
+    private func buildStatusPacket(_ live: Live) -> Data {
         var b = [UInt8](repeating: 0, count: 0x200)
         for (i, v) in DJLink.magic.enumerated() { b[i] = v }
         b[0x0a] = DJLink.PacketType.cdjStatus
         DJLinkCodec.writePaddedString(model, into: &b, at: DJLink.Header.statusModel, length: DJLink.Header.modelLength)
         b[0x1f] = 0x01
-        b[0x20] = 0x06                 // variante de paquete (CDJ-3000)
+        b[0x20] = 0x06
         b[0x21] = playerNumber
-        writeUInt16(0x0438, into: &b, at: 0x22)   // bytes restantes: marca CDJ-3000
+        writeUInt16(0x0438, into: &b, at: 0x22)
         b[0x24] = playerNumber
         b[0x25] = 0x00
 
-        writeUInt16(0x0001, into: &b, at: 0x26)   // actividad: reproduciendo
-        b[0x28] = playerNumber                    // pista cargada localmente
-        b[0x29] = 0x03                            // slot: USB
-        b[0x2a] = 0x01                            // pista analizada por rekordbox
-        writeUInt32(4021, into: &b, at: 0x2c)     // ID de pista
-        writeUInt32(7, into: &b, at: 0x30)        // nº de pista en la lista
-
-        b[0x7b] = 0x03                            // modo de reproducción: play
-        DJLinkCodec.writePaddedString("0104", into: &b, at: 0x7c, length: 4)
-
-        // Flags: play (0x40) + master (0x20) + sync (0x10) + on-air (0x08)
-        b[0x89] = 0x40 | 0x20 | 0x10 | 0x08
-        b[0x8b] = 0xfa                            // segundo indicador de play
-
-        let snapshot = stateQueue.sync { (bpm: bpm, pitch: pitchPercent, beat: beatCount, bar: beatInBar) }
-        let pitchRaw = UInt32(max(0, (1.0 + snapshot.pitch / 100.0) * Double(0x100000)))
-        writeUInt32(pitchRaw, into: &b, at: 0x8c)          // pitch físico
-        writeUInt16(0x8000, into: &b, at: 0x90)            // pista de rekordbox
-        writeUInt16(UInt16(snapshot.bpm * 100), into: &b, at: 0x92)
-        writeUInt32(pitchRaw, into: &b, at: 0x98)          // pitch efectivo
-        writeUInt32(UInt32(max(0, snapshot.beat)), into: &b, at: 0xa0)
-        b[0xa6] = UInt8(max(1, min(4, snapshot.bar)))
+        if live.loaded {
+            writeUInt16(live.playing ? 0x0001 : 0x0000, into: &b, at: 0x26)
+            b[0x28] = playerNumber
+            b[0x29] = 0x03
+            b[0x2a] = 0x01
+            writeUInt32(live.trackID, into: &b, at: 0x2c)
+            writeUInt32(1, into: &b, at: 0x30)
+            b[0x7b] = live.playing ? 0x03 : 0x05
+            DJLinkCodec.writePaddedString(DJLink.simulatorFirmware, into: &b, at: 0x7c, length: 4)
+            var flags: UInt8 = 0
+            if live.playing { flags |= 0x40 }
+            if live.isMaster { flags |= 0x20 }
+            b[0x89] = flags
+            b[0x8b] = live.playing ? 0xfa : 0x00
+            let pitchRaw = UInt32(0x100000)
+            writeUInt32(pitchRaw, into: &b, at: 0x8c)
+            writeUInt16(0x8000, into: &b, at: 0x90)
+            writeUInt16(UInt16(max(0, live.bpm * 100)), into: &b, at: 0x92)
+            writeUInt32(pitchRaw, into: &b, at: 0x98)
+            writeUInt32(UInt32(max(0, live.beatCount)), into: &b, at: 0xa0)
+            b[0xa6] = UInt8(max(0, min(4, live.beatInBar)))
+        } else {
+            writeUInt16(0x0000, into: &b, at: 0x26)
+            b[0x28] = 0x00
+            b[0x29] = 0x00
+            b[0x2a] = 0x00
+            writeUInt32(0, into: &b, at: 0x2c)
+            writeUInt32(0, into: &b, at: 0x30)
+            b[0x7b] = 0x00
+            DJLinkCodec.writePaddedString(DJLink.simulatorFirmware, into: &b, at: 0x7c, length: 4)
+            b[0x89] = 0x00
+            b[0x8b] = 0x00
+            writeUInt32(UInt32(0x100000), into: &b, at: 0x8c)
+            writeUInt16(0x0000, into: &b, at: 0x90)
+            writeUInt16(0xffff, into: &b, at: 0x92)
+            writeUInt32(UInt32(0x100000), into: &b, at: 0x98)
+            writeUInt32(0, into: &b, at: 0xa0)
+            b[0xa6] = 0
+        }
 
         return Data(b)
     }
@@ -148,22 +211,25 @@ public final class PioneerSimulator {
 
     private func runBeats() {
         guard let sock = makeSocket() else { return }
-        var lastBeat = -1
+        var lastBar = -1
         while !stopped {
-            let snapshot = stateQueue.sync { (beat: beatCount, bar: beatInBar, head: playhead, len: trackLength) }
-
-            if snapshot.beat != lastBeat {
-                lastBeat = snapshot.beat
-                sock.send(buildBeatPacket(beatInBar: snapshot.bar), to: "255.255.255.255", port: DJLink.beatPort)
+            let live = liveState()
+            if live.loaded {
+                if live.playing, live.beatInBar != lastBar, live.beatInBar > 0 {
+                    lastBar = live.beatInBar
+                    sock.send(buildBeatPacket(beatInBar: live.beatInBar, bpm: live.bpm),
+                              to: "255.255.255.255", port: DJLink.beatPort)
+                }
+                sock.send(buildPositionPacket(playhead: live.playhead, length: live.length, bpm: live.bpm),
+                          to: "255.255.255.255", port: DJLink.beatPort)
+            } else {
+                lastBar = -1
             }
-            sock.send(buildPositionPacket(playhead: snapshot.head, length: snapshot.len),
-                      to: "255.255.255.255", port: DJLink.beatPort)
-
             Thread.sleep(forTimeInterval: 0.05)
         }
     }
 
-    private func buildBeatPacket(beatInBar: Int) -> Data {
+    private func buildBeatPacket(beatInBar: Int, bpm: Double) -> Data {
         var b = [UInt8](repeating: 0, count: 0x60)
         for (i, v) in DJLink.magic.enumerated() { b[i] = v }
         b[0x0a] = DJLinkBeatPacket.typeBeat
@@ -172,16 +238,15 @@ public final class PioneerSimulator {
         b[0x21] = playerNumber
         b[0x23] = 0x3c
 
-        let snapshot = stateQueue.sync { (bpm: bpm, pitch: pitchPercent) }
-        let pitchRaw = UInt32(max(0, (1.0 + snapshot.pitch / 100.0) * Double(0x100000)))
+        let pitchRaw = UInt32(0x100000)
         writeUInt32(pitchRaw, into: &b, at: 0x54)
-        writeUInt16(UInt16(snapshot.bpm * 100), into: &b, at: 0x5a)
+        writeUInt16(UInt16(max(0, bpm * 100)), into: &b, at: 0x5a)
         b[0x5c] = UInt8(max(1, min(4, beatInBar)))
         b[0x5f] = playerNumber
         return Data(b)
     }
 
-    private func buildPositionPacket(playhead: Double, length: Double) -> Data {
+    private func buildPositionPacket(playhead: Double, length: Double, bpm: Double) -> Data {
         var b = [UInt8](repeating: 0, count: 0x3c)
         for (i, v) in DJLink.magic.enumerated() { b[i] = v }
         b[0x0a] = DJLinkBeatPacket.typeAbsolutePosition
@@ -189,9 +254,9 @@ public final class PioneerSimulator {
         writeUInt16(0x0100, into: &b, at: 0x1f)
         b[0x21] = playerNumber
 
-        writeUInt32(UInt32(max(0, length)), into: &b, at: 0x24)
+        writeUInt32(length > 0 ? UInt32(max(1, length.rounded())) : 0, into: &b, at: 0x24)
         writeUInt32(UInt32(max(0, playhead * 1000)), into: &b, at: 0x28)
-        writeUInt32(UInt32(max(0, effectiveBPM * 10)), into: &b, at: 0x38)
+        writeUInt32(UInt32(max(0, bpm * 10)), into: &b, at: 0x38)
         return Data(b)
     }
 

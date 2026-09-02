@@ -1,5 +1,5 @@
 // PlayerDeckRow.swift
-// Fila de deck: modo Grande (ShowKontrol) con tiempo LED en bloques + modo Pequeño compacto.
+// Fila de deck: Grande (monitor tipo ShowKontrol) y Pequeña (mosaico 2 col).
 
 import SwiftUI
 import AppKit
@@ -33,12 +33,27 @@ struct DeckDisplay: Identifiable {
     let cuePositionFraction: Double?    // 0…1 cue activo; nil = sin cue
     let loopInFraction: Double?         // 0…1
     let loopOutFraction: Double?        // 0…1
-    var artworkImage: NSImage? = nil   // portada del album (iTunes)
+    var peaks: [Float] = []             // waveform real (TEST); vacío = procedural
+    var artworkImage: NSImage? = nil
 
     var trackSeed: Int {
+        if !title.isEmpty {
+            var h = 0
+            for c in title.unicodeScalars { h = h &* 31 &+ Int(c.value) }
+            return abs(h)
+        }
         var h = 0
-        for c in title.unicodeScalars { h = h &* 31 &+ Int(c.value) }
+        for c in id.unicodeScalars { h = h &* 31 &+ Int(c.value) }
         return abs(h)
+    }
+
+    var kindLabel: String { source == .denon ? "DECK" : "PLAYER" }
+
+    /// Identificador corto para la tira izquierda (A/B o número de player).
+    var deckTag: String {
+        let last = label.split(separator: " ").last.map(String.init) ?? ""
+        if last.count <= 2 { return last.uppercased() }
+        return source == .pioneer ? "1" : "A"
     }
 }
 
@@ -48,84 +63,104 @@ struct PlayerDeckRow: View {
     let deck: DeckDisplay
     var isLarge: Bool = true
     var isLTCSource: Bool = false
+    var isHot: Bool = false
     var ltcAutoFollow: Bool = true
     var onSelectLTC: () -> Void = {}
 
     var body: some View {
-        if isLarge { largeBody } else { smallBody }
+        Group {
+            if isLarge { largeBody } else { smallBody }
+        }
+        .transaction { $0.animation = nil }
     }
 
     // ═══════════════════════════════════════
-    // MARK: Vista Grande (ShowKontrol style)
+    // MARK: Vista Grande (monitor DJ)
     // ═══════════════════════════════════════
 
     private var largeBody: some View {
-        VStack(spacing: 0) {
-            largeTopBar
-            largeTrackAndTime
-            WaveformView(
-                progress:    deck.progress ?? 0,
-                trackLength: deck.trackLength,
-                bpm:         deck.bpm,
-                beatInBar:   deck.beatInBar,
-                isPlaying:   deck.isPlaying,
-                accent:      deck.accent,
-                trackSeed:   deck.trackSeed,
-                cuePositionFraction: deck.cuePositionFraction,
-                loopInFraction:  deck.loopInFraction,
-                loopOutFraction: deck.loopOutFraction
-            )
-            .frame(height: 72)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 5)
-            .opacity(deck.loaded ? 1 : 0.30)
-            largeBottomBar
-        }
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.black.opacity(0.62))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(
-                    deck.isPlaying ? deck.accent.opacity(0.55) : Color.white.opacity(0.07),
-                    lineWidth: deck.isPlaying ? 1.5 : 1
+        HStack(alignment: .top, spacing: 0) {
+            deckIndexStrip
+
+            VStack(spacing: 0) {
+                largeMetaRow
+                WaveformView(
+                    progress:    deck.progress,
+                    trackLength: deck.trackLength,
+                    bpm:         deck.bpm,
+                    beatInBar:   deck.beatInBar,
+                    isPlaying:   deck.isPlaying,
+                    accent:      deck.accent,
+                    trackSeed:   deck.trackSeed,
+                    peaks: deck.peaks,
+                    cuePositionFraction: deck.cuePositionFraction,
+                    loopInFraction:  deck.loopInFraction,
+                    loopOutFraction: deck.loopOutFraction,
+                    mode: .scrolling,
+                    windowSeconds: 12
                 )
-        )
-    }
-
-    private var largeTopBar: some View {
-        HStack(spacing: 8) {
-            Circle()
-                .fill(deck.isPlaying ? deck.accent : Theme.textTertiary.opacity(0.35))
-                .frame(width: 7, height: 7)
-            Text(deck.label.uppercased())
-                .font(.system(size: 9, weight: .bold))
-                .tracking(0.6)
-                .foregroundColor(Theme.textSecondary)
-
-            if deck.isMaster { LEDTag(text: "MASTER", color: Theme.accent) }
-            if deck.isOnAir  { LEDTag(text: "ON AIR", color: Theme.red) }
-            if deck.isSynced { LEDTag(text: "SYNC",   color: Theme.cyan) }
-
-            Spacer()
-
-            ltcButton
+                .id(deck.id)
+                .frame(height: 92)
+                .opacity(deck.loaded && (deck.progress != nil || !deck.peaks.isEmpty) ? 1 : 0.28)
+                .transaction { $0.animation = nil }
+                largeBottomBar
+            }
         }
-        .padding(.horizontal, 14)
-        .padding(.top, 10)
-        .padding(.bottom, 5)
+        .background(Theme.deckFill)
+        .overlay(alignment: .leading) {
+            Rectangle()
+                .fill(deck.isPlaying ? deck.accent : Color.clear)
+                .frame(width: 2)
+        }
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Theme.rowDivider).frame(height: 1)
+        }
     }
 
-    private var largeTrackAndTime: some View {
-        HStack(alignment: .top, spacing: 14) {
+    private var deckIndexStrip: some View {
+        VStack(spacing: 5) {
+            Text(deck.kindLabel)
+                .font(.system(size: 7, weight: .bold))
+                .tracking(1.1)
+                .foregroundColor(Theme.textTertiary)
 
-            // Título + artista + key + estado
-            VStack(alignment: .leading, spacing: 4) {
-                Text(deck.loaded ? (deck.title.isEmpty ? "—" : deck.title) : "SIN PISTA")
-                    .font(.system(size: 17, weight: .semibold))
+            Text(deck.deckTag)
+                .font(.system(size: 20, weight: .bold, design: .monospaced))
+                .foregroundColor(Theme.textPrimary)
+                .frame(width: 34, height: 26)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 2)
+                        .stroke(deck.isPlaying ? deck.accent : Theme.rowDivider, lineWidth: 1)
+                )
+
+            Image(systemName: deck.isPlaying ? "play.fill" : "pause.fill")
+                .font(.system(size: 8))
+                .foregroundColor(deck.isPlaying ? Theme.ledGreen : Theme.textTertiary)
+
+            if deck.isMaster { LEDTag(text: "MST", color: Theme.accent) }
+            if deck.isOnAir  { LEDTag(text: "AIR", color: Theme.red) }
+            if deck.isSynced { LEDTag(text: "SYNC", color: Theme.cyan) }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.top, 8)
+        .padding(.bottom, 6)
+        .frame(width: 50)
+        .frame(maxHeight: .infinity)
+        .background(Theme.strip)
+        .overlay(alignment: .trailing) {
+            Rectangle().fill(Theme.rowDivider).frame(width: 1)
+        }
+    }
+
+    private var largeMetaRow: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(titleText)
+                    .font(.system(size: 20, weight: .bold))
                     .foregroundColor(deck.loaded ? Theme.ledGreen : Theme.textTertiary)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.7)
 
                 HStack(spacing: 8) {
                     if !deck.artist.isEmpty {
@@ -140,46 +175,45 @@ struct PlayerDeckRow: View {
                             .foregroundColor(Theme.purple)
                     }
                     Text(deck.stateLabel.uppercased())
-                        .font(.system(size: 9))
+                        .font(.system(size: 9, weight: .semibold))
+                        .tracking(0.6)
                         .foregroundColor(Theme.textTertiary)
+                    Text(deck.label.uppercased())
+                        .font(.system(size: 8, weight: .medium))
+                        .tracking(0.4)
+                        .foregroundColor(Theme.textTertiary)
+                        .lineLimit(1)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-            Spacer()
+            ledTimeDisplay
 
-            // BPM + bloques de tiempo LED
-            VStack(alignment: .trailing, spacing: 6) {
-                // BPM con pitch
+            VStack(alignment: .trailing, spacing: 1) {
+                if let pitch = deck.pitchPercent, abs(pitch) > 0.01 {
+                    Text(String(format: "%+.2f%%", pitch))
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .foregroundColor(Theme.cyan)
+                }
                 HStack(alignment: .lastTextBaseline, spacing: 4) {
-                    if let pitch = deck.pitchPercent, abs(pitch) > 0.01 {
-                        Text(String(format: "%+.2f%%", pitch))
-                            .font(.system(size: 9, design: .monospaced))
-                            .foregroundColor(Theme.cyan)
-                    }
-                    Text(deck.bpm > 0 ? String(format: "%.2f", deck.bpm) : "---.--")
-                        .font(.system(size: 26, weight: .bold, design: .monospaced))
-                        .foregroundColor(deck.bpm > 0 ? Theme.ledGreen : Theme.textTertiary.opacity(0.4))
+                    Text(bpmText)
+                        .font(.system(size: 32, weight: .bold, design: .monospaced))
+                        .foregroundColor(deck.bpm > 0 ? Theme.ledGreen : Theme.ledDim)
                     Text("BPM")
                         .font(.system(size: 9, weight: .bold))
                         .foregroundColor(Theme.textTertiary)
+                        .padding(.bottom, 4)
                 }
-
-                // Bloques LED de tiempo
-                ledTimeDisplay
-
-                // Tiempo restante pequeño
-                Text(remainingText)
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundColor(Theme.textTertiary)
             }
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 10)
+        .padding(.top, 6)
         .padding(.bottom, 4)
     }
 
     /// MM : SS . CS en bloques con etiqueta arriba
     private var ledTimeDisplay: some View {
-        HStack(alignment: .bottom, spacing: 2) {
+        HStack(alignment: .bottom, spacing: 3) {
             ledBlock(value: timeField(deck.elapsed, .min), label: "MIN")
             ledSep(":")
             ledBlock(value: timeField(deck.elapsed, .sec), label: "SEG")
@@ -189,25 +223,28 @@ struct PlayerDeckRow: View {
     }
 
     private func ledBlock(value: String, label: String) -> some View {
-        VStack(spacing: 2) {
+        VStack(spacing: 1) {
             Text(label)
                 .font(.system(size: 7, weight: .bold))
-                .tracking(0.4)
+                .tracking(0.6)
                 .foregroundColor(Theme.textTertiary)
             Text(value)
-                .font(.system(size: 28, weight: .bold, design: .monospaced))
-                .foregroundColor(deck.loaded ? Theme.ledGreen : Theme.textTertiary.opacity(0.25))
-                .frame(width: 52, height: 36, alignment: .center)
-                .background(Color.black.opacity(0.40))
-                .clipShape(RoundedRectangle(cornerRadius: 4))
+                .font(.system(size: 30, weight: .bold, design: .monospaced))
+                .foregroundColor(deck.loaded ? Theme.ledGreen : Theme.ledDim)
+                .frame(width: 54, height: 36, alignment: .center)
+                .background(Color.black)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 2)
+                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                )
         }
     }
 
     private func ledSep(_ char: String) -> some View {
         Text(char)
             .font(.system(size: 22, weight: .bold, design: .monospaced))
-            .foregroundColor(deck.loaded ? Theme.ledGreen.opacity(0.35) : Theme.textTertiary.opacity(0.15))
-            .padding(.bottom, 6)
+            .foregroundColor(deck.loaded ? Theme.ledGreen.opacity(0.40) : Theme.ledDim)
+            .padding(.bottom, 4)
     }
 
     private var largeBottomBar: some View {
@@ -220,31 +257,33 @@ struct PlayerDeckRow: View {
                     .foregroundColor(Theme.purple)
             }
 
+            Text(remainingText)
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundColor(Theme.textTertiary)
+
             Spacer()
 
             if let progress = deck.progress {
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
-                        Capsule().fill(Color.white.opacity(0.07))
-                        Capsule()
-                            .fill(LinearGradient(
-                                colors: [deck.accent.opacity(0.7), deck.accent],
-                                startPoint: .leading, endPoint: .trailing
-                            ))
-                            .frame(width: max(4, geo.size.width * progress))
+                        Rectangle().fill(Color.white.opacity(0.08))
+                        Rectangle()
+                            .fill(deck.accent)
+                            .frame(width: max(3, geo.size.width * progress))
                     }
                 }
-                .frame(width: 160, height: 5)
+                .frame(width: 180, height: 4)
 
                 Text(String(format: "%.0f%%", progress * 100))
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundColor(Theme.textTertiary)
                     .frame(width: 28, alignment: .trailing)
             }
+
+            ltcButton
         }
-        .padding(.horizontal, 14)
-        .padding(.bottom, 10)
-        .padding(.top, 3)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
     }
 
     // ═══════════════════════════════════════
@@ -252,66 +291,92 @@ struct PlayerDeckRow: View {
     // ═══════════════════════════════════════
 
     private var smallBody: some View {
-        HStack(spacing: 10) {
-            // Mini waveform
+        VStack(spacing: 0) {
+            HStack(alignment: .top, spacing: 8) {
+                VStack(spacing: 3) {
+                    Text(deck.kindLabel)
+                        .font(.system(size: 6, weight: .bold))
+                        .tracking(0.8)
+                        .foregroundColor(Theme.textTertiary)
+                    Text(deck.deckTag)
+                        .font(.system(size: 14, weight: .bold, design: .monospaced))
+                        .foregroundColor(Theme.textPrimary)
+                        .frame(width: 26, height: 20)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 2)
+                                .stroke(deck.isPlaying ? deck.accent : Theme.rowDivider, lineWidth: 1)
+                        )
+                }
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(titleText)
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundColor(deck.loaded ? Theme.ledGreen : Theme.textTertiary)
+                        .lineLimit(1)
+                    if !deck.artist.isEmpty {
+                        Text(deck.artist)
+                            .font(.system(size: 9))
+                            .foregroundColor(Theme.textSecondary)
+                            .lineLimit(1)
+                    }
+                }
+
+                Spacer(minLength: 4)
+
+                VStack(alignment: .trailing, spacing: 0) {
+                    Text(bpmText)
+                        .font(.system(size: 18, weight: .bold, design: .monospaced))
+                        .foregroundColor(deck.bpm > 0 ? Theme.ledGreen : Theme.ledDim)
+                    Text("BPM")
+                        .font(.system(size: 7, weight: .bold))
+                        .foregroundColor(Theme.textTertiary)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.top, 6)
+            .padding(.bottom, 4)
+
             WaveformView(
-                progress:    deck.progress ?? 0,
+                progress:    deck.progress,
                 trackLength: deck.trackLength,
                 bpm:         deck.bpm,
                 beatInBar:   deck.beatInBar,
                 isPlaying:   deck.isPlaying,
                 accent:      deck.accent,
                 trackSeed:   deck.trackSeed,
+                peaks: deck.peaks,
                 cuePositionFraction: deck.cuePositionFraction,
                 loopInFraction:  deck.loopInFraction,
-                loopOutFraction: deck.loopOutFraction
+                loopOutFraction: deck.loopOutFraction,
+                mode: .scrolling,
+                windowSeconds: isHot ? 8 : 24
             )
-            .frame(width: 90, height: 44)
-            .opacity(deck.loaded ? 1 : 0.30)
+            .id(deck.id)
+            .frame(height: isHot ? 54 : 36)
+            .opacity(deck.loaded && (deck.progress != nil || !deck.peaks.isEmpty) ? 1 : 0.28)
+            .transaction { $0.animation = nil }
 
-            // Info central
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 4) {
-                    Circle()
-                        .fill(deck.isPlaying ? deck.accent : Theme.textTertiary.opacity(0.30))
-                        .frame(width: 5, height: 5)
-                    if deck.isMaster { LEDTag(text: "M",   color: Theme.accent) }
-                    if deck.isOnAir  { LEDTag(text: "AIR", color: Theme.red) }
-                    if isLTCSource   { LEDTag(text: "LTC", color: Theme.purple) }
-                }
-                Text(deck.loaded ? (deck.title.isEmpty ? "—" : deck.title) : "SIN PISTA")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(deck.loaded ? Theme.ledGreen : Theme.textTertiary)
-                    .lineLimit(1)
-                if !deck.artist.isEmpty {
-                    Text(deck.artist)
-                        .font(.system(size: 9))
-                        .foregroundColor(Theme.textSecondary)
-                        .lineLimit(1)
-                }
-            }
-
-            Spacer()
-
-            // Tiempo + BPM + botón LTC
-            VStack(alignment: .trailing, spacing: 4) {
+            HStack(spacing: 8) {
                 Text(formatMS(deck.elapsed))
-                    .font(.system(size: 14, weight: .bold, design: .monospaced))
-                    .foregroundColor(deck.loaded ? Theme.ledGreen : Theme.textTertiary.opacity(0.4))
-                Text(deck.bpm > 0 ? String(format: "%.1f", deck.bpm) : "--.-")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(Theme.textSecondary)
+                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .foregroundColor(deck.loaded ? Theme.ledGreen : Theme.ledDim)
+                beatGrid(large: false)
+                Spacer()
+                if deck.isMaster { LEDTag(text: "MST", color: Theme.accent) }
+                if isLTCSource { LEDTag(text: "LTC", color: Theme.purple) }
                 ltcButton
             }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
         }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.black.opacity(0.52)))
+        .background(Theme.deckFill)
+        .overlay(alignment: .leading) {
+            Rectangle()
+                .fill(deck.isPlaying ? deck.accent : Color.clear)
+                .frame(width: 2)
+        }
         .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(
-                    deck.isPlaying ? deck.accent.opacity(0.45) : Color.white.opacity(0.06),
-                    lineWidth: 1
-                )
+            Rectangle().stroke(Theme.rowDivider, lineWidth: 1)
         )
     }
 
@@ -322,11 +387,11 @@ struct PlayerDeckRow: View {
     private var ltcButton: some View {
         Button(action: onSelectLTC) {
             HStack(spacing: 3) {
-                if isLTCSource && ltcAutoFollow {
-                    Image(systemName: "arrow.triangle.2.circlepath")
+                if isLTCSource {
+                    Image(systemName: "dot.radiowaves.left.and.right")
                         .font(.system(size: 7))
                 }
-                Text(isLTCSource ? "SMPTE ●" : "SMPTE")
+                Text("SMPTE")
                     .font(.system(size: 8, weight: .bold))
                     .tracking(0.3)
             }
@@ -334,20 +399,32 @@ struct PlayerDeckRow: View {
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
             .background(
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(isLTCSource ? Theme.purple : Color.white.opacity(0.08))
+                Rectangle()
+                    .fill(isLTCSource ? Theme.ledGreen : Color.white.opacity(0.08))
             )
         }
         .buttonStyle(.plain)
-        .help(isLTCSource ? "LTC fijado a este deck — pulsa para seguir al master" : "Fijar LTC a este deck")
+        .help(isLTCSource
+              ? "Este deck está emitiendo LTC. Pulsa para detener este generador (no reactiva el Master auto)."
+              : "Activar SMPTE LTC de esta pista en la salida asignada a esta fila.")
+    }
+
+    private var titleText: String {
+        if !deck.loaded { return "SIN PISTA" }
+        if deck.title.isEmpty { return "SIN TITULO" }
+        return deck.title
+    }
+
+    private var bpmText: String {
+        deck.bpm > 0 ? String(format: "%.2f", deck.bpm) : "---.--"
     }
 
     private func beatGrid(large: Bool) -> some View {
         HStack(spacing: 3) {
             ForEach(1...4, id: \.self) { pos in
-                RoundedRectangle(cornerRadius: 2)
+                Rectangle()
                     .fill(beatColor(pos))
-                    .frame(width: pos == 1 ? 9 : 6, height: large ? 18 : 12)
+                    .frame(width: pos == 1 ? 10 : 7, height: large ? 16 : 10)
             }
         }
         .opacity(deck.isPlaying ? 1 : 0.30)
@@ -363,19 +440,29 @@ struct PlayerDeckRow: View {
     private enum TimeField { case min, sec, cs }
 
     private func timeField(_ s: Double?, _ f: TimeField) -> String {
-        guard let s, s.isFinite, s >= 0 else { return "--" }
+        let t: Double
+        if let s, s.isFinite, s >= 0 {
+            t = s
+        } else if deck.loaded {
+            t = 0
+        } else {
+            return "--"
+        }
         switch f {
-        case .min: return String(format: "%02d", Int(s) / 60)
-        case .sec: return String(format: "%02d", Int(s) % 60)
-        case .cs:  return String(format: "%02d", Int(s * 100) % 100)
+        case .min: return String(format: "%02d", Int(t) / 60)
+        case .sec: return String(format: "%02d", Int(t) % 60)
+        case .cs:  return String(format: "%02d", Int(t * 100) % 100)
         }
     }
 
     private func formatMS(_ seconds: Double?) -> String {
-        guard let s = seconds, s.isFinite, s >= 0 else { return "--:--.--" }
-        let cs = Int(s * 100) % 100
-        let totalSec = Int(s)
-        return String(format: "%02d:%02d.%02d", totalSec / 60, totalSec % 60, cs)
+        if let s = seconds, s.isFinite, s >= 0 {
+            let cs = Int(s * 100) % 100
+            let totalSec = Int(s)
+            return String(format: "%02d:%02d.%02d", totalSec / 60, totalSec % 60, cs)
+        }
+        if deck.loaded { return "00:00.00" }
+        return "--:--.--"
     }
 
     private var remainingText: String {
@@ -396,7 +483,7 @@ struct LEDTag: View {
             .tracking(0.4)
             .foregroundColor(color)
             .padding(.horizontal, 4)
-            .padding(.vertical, 2)
-            .background(RoundedRectangle(cornerRadius: 3).fill(color.opacity(0.16)))
+            .padding(.vertical, 1)
+            .background(Rectangle().fill(color.opacity(0.16)))
     }
 }

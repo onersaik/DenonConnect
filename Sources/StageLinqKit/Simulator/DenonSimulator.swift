@@ -14,6 +14,27 @@
 
 import Foundation
 
+// MARK: - Estado externo inyectable desde el simulador UI
+
+public struct SimDeckState: Sendable {
+    public var title: String
+    public var artist: String
+    public var bpm: Double
+    public var isPlaying: Bool
+    public var positionSeconds: Double   // posición actual en segundos
+    public var duration: Double          // duración total en segundos
+    public var isMaster: Bool
+    public var key: String
+
+    public init(title: String = "", artist: String = "", bpm: Double = 0,
+                isPlaying: Bool = false, positionSeconds: Double = 0,
+                duration: Double = 0, isMaster: Bool = false, key: String = "") {
+        self.title = title; self.artist = artist; self.bpm = bpm
+        self.isPlaying = isPlaying; self.positionSeconds = positionSeconds
+        self.duration = duration; self.isMaster = isMaster; self.key = key
+    }
+}
+
 public final class DenonSimulator {
     public static let mainPort: UInt16 = 51338
     public static let stateMapPort: UInt16 = 51339
@@ -22,6 +43,15 @@ public final class DenonSimulator {
     /// Token propio, distinto del que usa el cliente, para que la app no
     /// confunda este anuncio con el suyo.
     private let token: [UInt8] = [11, 22, 33, 44, 55, 66, 77, 88, 99, 110, 121, 132, 143, 154, 165, 176]
+
+
+    /// Proveedor de estado externo. Si está configurado, snapshot() lo usa en lugar del
+    /// reloj interno. El SimulatorController lo asigna para que los datos reales fluyan.
+    public var stateProvider: (() -> [SimDeckState])?
+
+    /// Si es true y no hay stateProvider, se emiten los decks internos.
+    /// Por defecto false: sin proveedor no hay pista (la app principal no ve nada ficticio).
+    public var standaloneMode: Bool = false
 
     private let deviceName: String
     private let log: (String) -> Void
@@ -49,10 +79,8 @@ public final class DenonSimulator {
     }
 
     private var decks: [SimDeck] = [
-        SimDeck(title: "Midnight Protocol", artist: "Entik Records", key: "8A", genre: "Techno",
-                bpm: 128.0, lengthSeconds: 312, playing: true, beat: 0, isMaster: true),
-        SimDeck(title: "Warehouse Signal", artist: "DJ Saik", key: "9A", genre: "Tech House",
-                bpm: 126.0, lengthSeconds: 268, playing: true, beat: 0, isMaster: false),
+        SimDeck(title: "", artist: "", key: "", genre: "", bpm: 128.0, lengthSeconds: 300, playing: false, beat: 0, isMaster: false),
+        SimDeck(title: "", artist: "", key: "", genre: "", bpm: 128.0, lengthSeconds: 300, playing: false, beat: 0, isMaster: false),
     ]
 
     public init(deviceName: String = "SC6000-SIM", log: @escaping (String) -> Void = { _ in }) {
@@ -69,16 +97,27 @@ public final class DenonSimulator {
         queue.async { [weak self] in self?.runStateMapListener() }
         queue.async { [weak self] in self?.runBeatInfoListener() }
         queue.async { [weak self] in self?.runClock() }
-        log("🎛 Simulador Denon iniciado como «\(deviceName)»")
+        log("[Denon] Simulador Denon iniciado como «\(deviceName)»")
     }
 
     public func stop() {
         stateQueue.sync { stoppedFlag = true }
+        if let sock = announceSocket {
+            let packet = DiscoveryCodec.build(
+                token: token,
+                source: "JC11",
+                action: StageLinq.actionLogout,
+                name: deviceName,
+                version: "1.6.0",
+                port: DenonSimulator.mainPort
+            )
+            sock.send(packet, to: "255.255.255.255", port: StageLinq.listenPort)
+        }
         announceSocket?.close()
         mainListener?.close()
         stateListener?.close()
         beatInfoListenerClose()
-        log("⏹ Simulador Denon detenido")
+        log("[Denon] Simulador detenido")
     }
 
     private func beatInfoListenerClose() {
@@ -88,28 +127,59 @@ public final class DenonSimulator {
     // MARK: - Reloj: hace avanzar los beats de las pistas simuladas
 
     private func runClock() {
-        let tick = 0.05
+        let tick = 1.0 / 60.0
         while !stopped {
-            stateQueue.sync {
-                for i in decks.indices where decks[i].playing {
-                    decks[i].beat += (decks[i].bpm / 60.0) * tick
-                    let totalBeats = decks[i].lengthSeconds * decks[i].bpm / 60.0
-                    if decks[i].beat > totalBeats { decks[i].beat = 0 }
+            // Cuando el stateProvider está activo, la posición viene de fuera
+            if stateProvider == nil {
+                stateQueue.sync {
+                    for i in decks.indices where decks[i].playing {
+                        decks[i].beat += (decks[i].bpm / 60.0) * tick
+                        let totalBeats = decks[i].lengthSeconds * decks[i].bpm / 60.0
+                        if decks[i].beat > totalBeats { decks[i].beat = 0 }
+                    }
                 }
+                Thread.sleep(forTimeInterval: tick)
+            } else {
+                Thread.sleep(forTimeInterval: 0.25)
             }
-            Thread.sleep(forTimeInterval: tick)
         }
     }
 
+    private static let unloadedDecks: [SimDeck] = [
+        SimDeck(title: "", artist: "", key: "", genre: "", bpm: 0, lengthSeconds: 0, playing: false, beat: 0, isMaster: false),
+        SimDeck(title: "", artist: "", key: "", genre: "", bpm: 0, lengthSeconds: 0, playing: false, beat: 0, isMaster: false),
+    ]
+
     private func snapshot() -> [SimDeck] {
-        stateQueue.sync { decks }
+        if let provider = stateProvider {
+            return provider().map { s in
+                let loaded = !s.title.isEmpty || s.duration > 0
+                let bpm = MusicalClock.bpm(s.bpm)
+                let dur = s.duration > 0 ? s.duration : 0
+                let beats = (loaded && dur > 0 && bpm > 0) ? s.positionSeconds * bpm / 60.0 : 0
+                return SimDeck(
+                    title: s.title,
+                    artist: s.artist,
+                    key: s.key,
+                    genre: "",
+                    bpm: bpm,
+                    lengthSeconds: dur,
+                    playing: loaded && s.isPlaying,
+                    beat: beats,
+                    isMaster: s.isMaster)
+            }
+        }
+        if standaloneMode {
+            return stateQueue.sync { decks }
+        }
+        return Self.unloadedDecks
     }
 
     // MARK: - Anuncio por UDP
 
     private func runAnnounce() {
         guard let sock = try? UDPSocket(listenPort: nil) else {
-            log("⚠️ Simulador: no se pudo crear el socket de anuncio")
+            log("[AVISO] Simulador: no se pudo crear el socket de anuncio")
             return
         }
         announceSocket = sock
@@ -134,14 +204,14 @@ public final class DenonSimulator {
 
     private func runMainListener() {
         guard let listener = try? TCPListener(port: DenonSimulator.mainPort) else {
-            log("⚠️ Simulador: puerto \(DenonSimulator.mainPort) ocupado")
+            log("[AVISO] Simulador: puerto \(DenonSimulator.mainPort) ocupado")
             return
         }
         mainListener = listener
 
         while !stopped {
             guard let conn = listener.accept() else { continue }
-            log("🔌 La app se ha conectado a la conexión principal")
+            log("[Conexion] La app se ha conectado a la conexión principal")
             queue.async { [weak self] in self?.serveMain(conn) }
         }
         listener.close()
@@ -157,7 +227,7 @@ public final class DenonSimulator {
         // 2) Anuncio de los servicios disponibles.
         announceService(conn, name: "StateMap", port: DenonSimulator.stateMapPort)
         announceService(conn, name: "BeatInfo", port: DenonSimulator.beatInfoPort)
-        log("📢 Servicios anunciados: StateMap y BeatInfo")
+        log("[Info] Servicios anunciados: StateMap y BeatInfo")
 
         // 3) Mantenemos la conexión viva leyendo lo que mande la app.
         while !stopped {
@@ -183,36 +253,75 @@ public final class DenonSimulator {
 
     private func runStateMapListener() {
         guard let listener = try? TCPListener(port: DenonSimulator.stateMapPort) else {
-            log("⚠️ Simulador: puerto \(DenonSimulator.stateMapPort) ocupado")
+            log("[AVISO] Simulador: puerto \(DenonSimulator.stateMapPort) ocupado")
             return
         }
         stateListener = listener
 
         while !stopped {
             guard let conn = listener.accept() else { continue }
-            log("📊 La app se ha suscrito a StateMap")
+            log("[Info] La app se ha suscrito a StateMap")
             queue.async { [weak self] in self?.serveStateMap(conn) }
         }
         listener.close()
     }
 
     private func serveStateMap(_ conn: TCPConnection) {
-        // Enviamos el estado completo al conectar y luego solo lo que cambia.
+        // Timeout corto: el receive bloqueante de 5 s retrasaba Play/título
+        // hasta el siguiente timeout del cliente.
+        conn.setReadTimeout(milliseconds: 20)
         sendFullState(conn)
 
-        var lastPlaying: [Bool] = snapshot().map { $0.playing }
+        var last = snapshot()
+        var ticks = 0
         while !stopped {
-            _ = try? conn.receive() // consumimos las suscripciones que llegan
-            let current = snapshot()
-            for (index, deck) in current.enumerated() where index < lastPlaying.count {
-                if deck.playing != lastPlaying[index] {
-                    sendState(conn, path: "/Engine/Deck\(index + 1)/Play", json: boolJSON(deck.playing))
-                    lastPlaying[index] = deck.playing
-                }
+            do {
+                _ = try conn.receive()
+            } catch {
+                break
             }
-            Thread.sleep(forTimeInterval: 0.5)
+            let current = snapshot()
+            ticks += 1
+            if ticks % 60 == 0 {
+                sendFullState(conn)
+            } else {
+                sendStateDiff(conn, previous: last, current: current)
+            }
+            last = current
+            Thread.sleep(forTimeInterval: 1.0 / 30.0)
         }
         conn.close()
+    }
+
+    private func sendStateDiff(_ conn: TCPConnection, previous: [SimDeck], current: [SimDeck]) {
+        for (index, deck) in current.enumerated() {
+            let n = index + 1
+            let prev = index < previous.count ? previous[index] : nil
+            if prev?.playing != deck.playing {
+                sendState(conn, path: "/Engine/Deck\(n)/Play", json: boolJSON(deck.playing))
+            }
+            if prev?.title != deck.title {
+                sendState(conn, path: "/Engine/Deck\(n)/Track/SongName", json: stringJSON(deck.title))
+                sendState(conn, path: "/Engine/Deck\(n)/Track/SongLoaded", json: boolJSON(!deck.title.isEmpty))
+            }
+            if prev?.artist != deck.artist {
+                sendState(conn, path: "/Engine/Deck\(n)/Track/ArtistName", json: stringJSON(deck.artist))
+            }
+            if prev.map({ abs($0.bpm - deck.bpm) > 0.001 }) ?? true {
+                sendState(conn, path: "/Engine/Deck\(n)/CurrentBPM", json: numberJSON(deck.bpm))
+            }
+            if prev.map({ abs($0.lengthSeconds - deck.lengthSeconds) > 0.01 }) ?? true {
+                sendState(conn, path: "/Engine/Deck\(n)/Track/TrackLength", json: numberJSON(deck.lengthSeconds))
+            }
+            if prev?.isMaster != deck.isMaster, n <= 2 {
+                sendState(conn, path: "/Client/Deck\(n)/DeckIsMaster", json: boolJSON(deck.isMaster))
+            }
+        }
+        let masterTempo = current.first(where: { $0.isMaster })?.bpm ?? 0
+        let prevMaster = previous.first(where: { $0.isMaster })?.bpm ?? 0
+        if abs(masterTempo - prevMaster) > 0.001 {
+            sendState(conn, path: "/Engine/Master/MasterTempo", json: numberJSON(masterTempo))
+        }
     }
 
     private func sendFullState(_ conn: TCPConnection) {
@@ -223,16 +332,17 @@ public final class DenonSimulator {
             let n = index + 1
             if deck.isMaster { masterTempo = deck.bpm }
 
-            sendState(conn, path: "/Engine/Deck\(n)/Track/SongLoaded", json: boolJSON(true))
+            let loaded = !deck.title.isEmpty || deck.lengthSeconds > 0
+            sendState(conn, path: "/Engine/Deck\(n)/Track/SongLoaded", json: boolJSON(loaded))
             sendState(conn, path: "/Engine/Deck\(n)/Track/SongName", json: stringJSON(deck.title))
             sendState(conn, path: "/Engine/Deck\(n)/Track/ArtistName", json: stringJSON(deck.artist))
             sendState(conn, path: "/Engine/Deck\(n)/Track/CurrentKey", json: stringJSON(deck.key))
             sendState(conn, path: "/Engine/Deck\(n)/Track/Genre", json: stringJSON(deck.genre))
             sendState(conn, path: "/Engine/Deck\(n)/Track/TrackLength", json: numberJSON(deck.lengthSeconds))
-            sendState(conn, path: "/Engine/Deck\(n)/Track/KeyLock", json: boolJSON(true))
-            sendState(conn, path: "/Engine/Deck\(n)/Track/LoopEnableState", json: boolJSON(n == 2))
+            sendState(conn, path: "/Engine/Deck\(n)/Track/KeyLock", json: boolJSON(loaded))
+            sendState(conn, path: "/Engine/Deck\(n)/Track/LoopEnableState", json: boolJSON(false))
             sendState(conn, path: "/Engine/Deck\(n)/CurrentBPM", json: numberJSON(deck.bpm))
-            sendState(conn, path: "/Engine/Deck\(n)/ExternalMixerVolume", json: numberJSON(n == 1 ? 0.85 : 0.6))
+            sendState(conn, path: "/Engine/Deck\(n)/ExternalMixerVolume", json: numberJSON(loaded ? (n == 1 ? 0.85 : 0.6) : 0))
             sendState(conn, path: "/Engine/Deck\(n)/Play", json: boolJSON(deck.playing))
             if n <= 2 {
                 sendState(conn, path: "/Client/Deck\(n)/DeckIsMaster", json: boolJSON(deck.isMaster))
@@ -267,14 +377,14 @@ public final class DenonSimulator {
 
     private func runBeatInfoListener() {
         guard let listener = try? TCPListener(port: DenonSimulator.beatInfoPort) else {
-            log("⚠️ Simulador: puerto \(DenonSimulator.beatInfoPort) ocupado")
+            log("[AVISO] Simulador: puerto \(DenonSimulator.beatInfoPort) ocupado")
             return
         }
         beatListener = listener
 
         while !stopped {
             guard let conn = listener.accept() else { continue }
-            log("🥁 La app se ha suscrito a BeatInfo")
+            log("[Info] La app se ha suscrito a BeatInfo")
             queue.async { [weak self] in self?.serveBeatInfo(conn) }
         }
         listener.close()
@@ -289,9 +399,11 @@ public final class DenonSimulator {
             payload.writeUInt64(clock)
             payload.writeUInt32(UInt32(current.count))
             for deck in current {
+                let clock = MusicalClock.bpm(deck.bpm)
+                let totalBeats = (clock > 0 && deck.lengthSeconds > 0) ? deck.lengthSeconds * clock / 60.0 : 0
                 payload.writeFloat64(deck.beat)
-                payload.writeFloat64(deck.lengthSeconds * deck.bpm / 60.0)
-                payload.writeFloat64(deck.bpm)
+                payload.writeFloat64(totalBeats)
+                payload.writeFloat64(clock)
             }
             for _ in current {
                 payload.writeFloat64(0)
@@ -307,7 +419,7 @@ public final class DenonSimulator {
             }
 
             clock &+= 1
-            Thread.sleep(forTimeInterval: 0.05)
+            Thread.sleep(forTimeInterval: 1.0 / 60.0)
         }
         conn.close()
     }

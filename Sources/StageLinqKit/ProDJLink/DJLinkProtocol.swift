@@ -23,7 +23,43 @@ public enum DJLink {
     /// Número de dispositivo virtual con el que nos anunciamos. Se recomienda 7
     /// para no chocar con reproductores reales (que usan 1–6).
     public static let virtualPlayerNumber: UInt8 = 7
-    public static let virtualModelName = "SC6000 Connect"
+    public static let virtualModelName = "STAGE CONNECT"
+    /// Firmware de 4 chars que emite STAGE CONNECT TEST. No lo usa un CDJ real.
+    public static let simulatorFirmware = "TEST"
+
+    public static func isVirtualCDJ(playerNumber: Int, model: String) -> Bool {
+        playerNumber == Int(virtualPlayerNumber) || model == virtualModelName
+    }
+
+    /// Solo el CDJ virtual de STAGE CONNECT (player 7). El PioneerSimulator
+    /// de TEST en este Mac SÍ se muestra, con título/BPM/waveform vía TestLink.
+    public static func shouldIgnoreIncomingPioneer(
+        playerNumber: Int,
+        model: String,
+        ip: String,
+        firmware: String = ""
+    ) -> Bool {
+        isVirtualCDJ(playerNumber: playerNumber, model: model)
+    }
+
+    /// Reloj del PioneerSimulator antiguo: 130 BPM × +1.50% = 131.95,
+    /// duración 294 s, trackID 4021. Un CDJ real no coincide con esto.
+    public static func looksLikeLegacyFakeClock(
+        playerNumber: Int,
+        pitchPercent: Double,
+        trackBPM: Double,
+        effectiveBPM: Double,
+        trackLength: Double = 0,
+        trackID: UInt32 = 0
+    ) -> Bool {
+        guard playerNumber == 2 else { return false }
+        let pitchHit = abs(pitchPercent - 1.5) < 0.08
+        let bpmHit = abs(effectiveBPM - 131.95) < 0.04
+            || (abs(trackBPM - 130.0) < 0.05 && pitchHit)
+        let idHit = trackID == 4021
+        let lengthHit = abs(trackLength - 294.0) < 1.5
+        return pitchHit && bpmHit && (idHit || lengthHit)
+    }
 
     /// Tipos de paquete (byte 0x0a).
     public enum PacketType {

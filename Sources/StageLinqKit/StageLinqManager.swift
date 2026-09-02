@@ -14,6 +14,9 @@ import Combine
 public final class StageLinqManager: ObservableObject {
     @Published public private(set) var devices: [StageLinqDevice] = []
     @Published public private(set) var logLines: [String] = []
+    /// Cambia cuando aparece/desaparece un deck con pista. ContentView no observa
+    /// los DeckState anidados: sin esto la fila no nacería al cargar audio en TEST.
+    @Published public private(set) var rosterRevision: UInt64 = 0
 
     private var devicesByKey: [String: StageLinqDevice] = [:]
     private let bookkeepingQueue = DispatchQueue(label: "com.entikrecords.sc6000connect.bookkeeping")
@@ -42,6 +45,7 @@ public final class StageLinqManager: ObservableObject {
         bookkeepingQueue.sync { stoppedFlag = false }
         netQueue.async { [weak self] in self?.runDiscoveryListener() }
         netQueue.async { [weak self] in self?.runAnnounce() }
+        netQueue.async { [weak self] in self?.runStalePrune() }
     }
 
     public func stop() {
@@ -63,9 +67,13 @@ public final class StageLinqManager: ObservableObject {
             while !stopped {
                 guard let (data, ip) = socket.receive() else { continue }
                 guard var info = DiscoveryCodec.parse(data) else { continue }
-                guard info.action == StageLinq.actionLogin else { continue }
                 guard info.token != StageLinq.soundSwitchToken else { continue } // nuestro propio anuncio
                 info.address = ip
+                if info.action == StageLinq.actionLogout {
+                    handleLogout(info)
+                    continue
+                }
+                guard info.action == StageLinq.actionLogin else { continue }
                 handleDiscovered(info)
             }
             socket.close()
@@ -96,23 +104,79 @@ public final class StageLinqManager: ObservableObject {
 
     // MARK: - Ciclo de vida por dispositivo
 
-    private func handleDiscovered(_ info: DiscoveryInfo) {
-        let key = "\(info.address):\(info.port)"
-
-        let isNew: Bool = bookkeepingQueue.sync {
-            if devicesByKey[key] != nil { return false }
-            let device = StageLinqDevice(info: info)
-            devicesByKey[key] = device
-            return true
+    /// Una unidad StageLinq = un token. El mismo SC6000 (o el simulador TEST)
+    /// puede anunciarse por WiFi y por Ethernet; si se clavea por IP salen
+    /// dos filas idénticas.
+    private static func deviceKey(_ info: DiscoveryInfo) -> String {
+        let token = info.token.map { String(format: "%02x", $0) }.joined()
+        if token.isEmpty || token.allSatisfy({ $0 == "0" }) {
+            return "\(info.address):\(info.port)"
         }
-        guard isNew, let device = bookkeepingQueue.sync(execute: { devicesByKey[key] }) else { return }
+        return "tok-\(token)"
+    }
+
+    private func handleDiscovered(_ info: DiscoveryInfo) {
+        let key = Self.deviceKey(info)
+
+        let existing: StageLinqDevice? = bookkeepingQueue.sync {
+            if let d = devicesByKey[key] { return d }
+            return devicesByKey.values.first { $0.token == info.token && !info.token.isEmpty }
+        }
+        if let existing {
+            existing.lastSeen = Date()
+            return
+        }
+
+        let device = StageLinqDevice(info: info)
+        bookkeepingQueue.sync { devicesByKey[key] = device }
 
         DispatchQueue.main.async {
-            self.devices.append(device)
+            if !self.devices.contains(where: { $0.token == device.token && !device.token.isEmpty }) {
+                self.devices.append(device)
+                self.rosterRevision &+= 1
+            }
         }
-        log(" Descubierto: \(info.name) (\(info.source)) v\(info.version) @ \(key)")
+        log(" Descubierto: \(info.name) (\(info.source)) v\(info.version) @ \(info.address):\(info.port)")
 
         connectToDevice(device)
+    }
+
+    private func handleLogout(_ info: DiscoveryInfo) {
+        let key = Self.deviceKey(info)
+        let device: StageLinqDevice? = bookkeepingQueue.sync {
+            if let d = devicesByKey[key] { return d }
+            return devicesByKey.values.first { $0.token == info.token }
+        }
+        guard let device else { return }
+        forget(device, reason: "logout")
+    }
+
+    private func runStalePrune() {
+        while !stopped {
+            Thread.sleep(forTimeInterval: 1.0)
+            let now = Date()
+            let stale: [StageLinqDevice] = bookkeepingQueue.sync {
+                devicesByKey.values.filter { now.timeIntervalSince($0.lastSeen) > 3.0 }
+            }
+            for device in stale {
+                forget(device, reason: "sin anuncio")
+            }
+        }
+    }
+
+    private func forget(_ device: StageLinqDevice, reason: String) {
+        bookkeepingQueue.sync {
+            let tokenKey = "tok-" + device.token.map { String(format: "%02x", $0) }.joined()
+            devicesByKey.removeValue(forKey: tokenKey)
+            devicesByKey.removeValue(forKey: device.id)
+            mainConnections[device.id]?.stop()
+            mainConnections.removeValue(forKey: device.id)
+        }
+        DispatchQueue.main.async {
+            self.devices.removeAll { $0.id == device.id }
+            self.rosterRevision &+= 1
+        }
+        log(" Ausente: \(device.name) @ \(device.id) (\(reason))")
     }
 
     private func connectToDevice(_ device: StageLinqDevice) {
@@ -167,7 +231,9 @@ public final class StageLinqManager: ObservableObject {
         do {
             try svc.run { path, value in
                 DispatchQueue.main.async {
+                    let structural = path.hasSuffix("/SongLoaded") || path.hasSuffix("/SongName")
                     StageLinqManager.applyState(device: device, path: path, value: value)
+                    if structural { self.rosterRevision &+= 1 }
                 }
             }
         } catch {
@@ -211,6 +277,7 @@ public final class StageLinqManager: ObservableObject {
         let deck = device.decks[deckNum - 1]
         let suffix = String(path.dropFirst("/Engine/Deck\(deckNum)".count))
         deck.lastUpdate = Date()
+        device.lastSeen = Date()
 
         switch suffix {
         case "/Play":
@@ -266,13 +333,21 @@ public final class StageLinqManager: ObservableObject {
     }
 
     private static func applyBeat(device: StageLinqDevice, beatData: BeatData) {
+        device.lastSeen = Date()
         for (index, beat) in beatData.decks.enumerated() {
             guard index < device.decks.count else { break }
             let deck = device.decks[index]
             let crossedBeat = Int(beat.beat) != Int(deck.currentBeat)
             deck.currentBeat = beat.beat
-            deck.totalBeats = beat.totalBeats
-            deck.beatBpm = beat.bpm
+            if abs(deck.totalBeats - beat.totalBeats) > 0.01 {
+                deck.totalBeats = beat.totalBeats
+            }
+            if abs(deck.beatBpm - beat.bpm) > 0.001 {
+                deck.beatBpm = beat.bpm
+            }
+            if beat.bpm > 0, abs(deck.bpm - beat.bpm) > 0.001 {
+                deck.bpm = beat.bpm
+            }
             if crossedBeat {
                 deck.beatPulse.toggle()
             }

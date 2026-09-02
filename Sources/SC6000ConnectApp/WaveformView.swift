@@ -1,184 +1,309 @@
 // WaveformView.swift
-// Waveform RGB estilo CDJ/SC6000: barras con tres bandas de color superpuestas
-// (graves=rojo, medios=verde, agudos=cian), mayor resolución, marcador de cue
-// naranja y región de loop verde semitransparente.
-//
-// Sin audio real del dispositivo, las bandas se generan proceduralmente con
-// sinusoides de diferente frecuencia: la misma pista siempre produce el mismo
-// patrón visual y se desplaza suavemente con la aguja real del deck.
+// Waveform RGB estilo CDJ: graves rojo, medios verde, agudos cian.
+// Vista Grande: aguja fija al centro, las barras se desplazan con subpíxel
+// (no un scrubber que salta de barra en barra). Peaks reales de TEST si
+// existen; si no, patrón procedural estable por trackSeed. Sin reloj 294 s.
 
 import SwiftUI
 
+enum WaveformMode {
+    /// Ventana que se desplaza; playhead fijo al centro (vista Grande).
+    case scrolling
+    /// Toda la pista; playhead en la fracción de progreso (vista Pequeña).
+    case overview
+}
+
 struct WaveformView: View {
-    let progress:    Double        // 0-1 posición en la pista
-    let trackLength: Double?       // segundos totales (nil → 300s asumido)
+    let progress:    Double?
+    let trackLength: Double?
     let bpm:         Double
-    let beatInBar:   Int           // 1-4 beat actual
+    let beatInBar:   Int
     let isPlaying:   Bool
     let accent:      Color
-    let trackSeed:   Int           // hash del título: patrón consistente por pista
-
-    // Marcadores (opcionales)
-    var cuePositionFraction: Double? = nil  // 0…1 posición del cue
-    var loopInFraction:  Double? = nil      // 0…1 inicio del loop
-    var loopOutFraction: Double? = nil      // 0…1 fin del loop
-
-    // Resolución: barras a cada lado del playhead
-    private let halfBars = 110
+    let trackSeed:   Int
+    var peaks:       [Float] = []
+    var cuePositionFraction: Double? = nil
+    var loopInFraction:  Double? = nil
+    var loopOutFraction: Double? = nil
+    var mode: WaveformMode = .scrolling
+    /// Ventana visible en segundos. CDJ ~12 s; vista 4: más zoom en el deck
+    /// caliente (~8 s) y más contexto en el resto (~24 s).
+    var windowSeconds: Double = 12.0
+    private let halfBars = 96
     private var totalBars: Int { halfBars * 2 + 1 }
-
-    // Barras por beat (zoom)
-    private let barsPerBeat: Double = 4.0
 
     var body: some View {
         Canvas { ctx, size in
-            drawWaveform(ctx: ctx, size: size)
+            ctx.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Color.black))
+            let midY = size.height / 2
+            ctx.fill(
+                Path(CGRect(x: 0, y: midY - 0.5, width: size.width, height: 1)),
+                with: .color(accent.opacity(0.16))
+            )
+            if mode == .overview {
+                drawOverview(ctx: ctx, size: size)
+            } else {
+                drawScrolling(ctx: ctx, size: size)
+            }
         }
-        .frame(height: 56)
-        .background(Color.black.opacity(0.45))
-        .clipShape(RoundedRectangle(cornerRadius: 5))
-        .overlay(edgeFade)
+        .transaction { $0.animation = nil }
+        .frame(minHeight: 36)
+        .background(Color.black)
     }
 
-    // MARK: - Render principal
+    // MARK: - Tiempo real de la pista (nunca 294 / 300 inventados)
 
-    private func drawWaveform(ctx: GraphicsContext, size: CGSize) {
-        let barW    = size.width / CGFloat(totalBars)
-        let midX    = size.width / 2.0
-        let midY    = size.height / 2.0
+    private var elapsedSeconds: Double {
+        if let p = progress, let l = trackLength, l > 0, p.isFinite, l.isFinite {
+            return min(max(p, 0), 1) * l
+        }
+        return 0
+    }
 
-        let effectiveBPM = bpm > 20 ? bpm : 120.0
-        let length       = trackLength.flatMap { $0 > 0 ? $0 : nil } ?? 300.0
-        let totalBeats   = length * effectiveBPM / 60.0
-        let currentBeat  = progress * totalBeats
+    private var durationSeconds: Double {
+        let l = trackLength ?? 0
+        return l > 0 && l.isFinite ? l : 0
+    }
 
-        // ── Región de loop (debajo de las barras) ──────────────────────────
+    private var hasTimeline: Bool { durationSeconds > 0 && progress != nil }
+
+    // MARK: - Scrolling (CDJ): playhead al centro, scroll subpíxel
+
+    private func drawScrolling(ctx: GraphicsContext, size: CGSize) {
+        let barW = size.width / CGFloat(totalBars)
+        let midX = size.width / 2
+        let midY = size.height / 2
+        let maxH = size.height * 0.92
+        let elapsed = elapsedSeconds
+        let duration = durationSeconds
+        let secPerBar = windowSeconds / Double(totalBars)
+
+        // Desplazamiento fraccionario: las barras se mueven de verdad, no saltan.
+        let exact = elapsed / secPerBar
+        let frac = exact - floor(exact)
+        let shift = CGFloat(frac) * barW
+
+        drawLoopScrolling(ctx: ctx, size: size, elapsed: elapsed, secPerBar: secPerBar, shift: shift, barW: barW)
+
+        for i in 0..<(totalBars + 1) {
+            let offset = Double(i - halfBars)
+            let t = elapsed + (offset - frac) * secPerBar
+            let x = CGFloat(i) * barW + barW / 2 - shift
+            guard x > -barW && x < size.width + barW else { continue }
+
+            drawBeatGridLine(ctx: ctx, x: x, size: size, time: t)
+
+            let inTrack = hasTimeline && t >= -0.02 && t <= duration + 0.02
+            let isPast = t < elapsed
+            let fade: Double = inTrack ? (isPast ? 0.94 : 0.74) : 0.22
+            let (bass, mid, hi) = bandsAt(time: t)
+            drawRGBBar(ctx: ctx, x: x, barW: barW, midY: midY, maxH: maxH,
+                       bass: bass, mid: mid, hi: hi, fade: fade)
+        }
+
+        drawPlayhead(ctx: ctx, x: midX, size: size)
+        drawCueScrolling(ctx: ctx, size: size, elapsed: elapsed, secPerBar: secPerBar, shift: shift, barW: barW)
+    }
+
+    // MARK: - Overview (pista completa)
+
+    private func drawOverview(ctx: GraphicsContext, size: CGSize) {
+        let nBars = max(160, Int(size.width / 2))
+        let barW = size.width / CGFloat(nBars)
+        let midY = size.height / 2
+        let maxH = size.height * 0.90
+        let duration = durationSeconds
+        let prog = hasTimeline ? min(max(progress ?? 0, 0), 1) : 0
+        let playX = CGFloat(prog) * size.width
+
         if let loopIn = loopInFraction, let loopOut = loopOutFraction, loopIn < loopOut {
-            let loopInBeat  = loopIn  * totalBeats
-            let loopOutBeat = loopOut * totalBeats
-            let x1 = xForBeat(loopInBeat,  current: currentBeat, barW: barW, halfBars: halfBars, size: size)
-            let x2 = xForBeat(loopOutBeat, current: currentBeat, barW: barW, halfBars: halfBars, size: size)
-            if x2 > x1 {
-                let loopRect = CGRect(x: x1, y: 0, width: x2 - x1, height: size.height)
-                ctx.fill(Path(loopRect), with: .color(Color.green.opacity(0.18)))
-                // bordes del loop
-                ctx.fill(Path(CGRect(x: x1, y: 0, width: 1.5, height: size.height)), with: .color(Color.green.opacity(0.80)))
-                ctx.fill(Path(CGRect(x: x2 - 1.5, y: 0, width: 1.5, height: size.height)), with: .color(Color.green.opacity(0.80)))
-            }
+            let x1 = CGFloat(loopIn) * size.width
+            let x2 = CGFloat(loopOut) * size.width
+            ctx.fill(Path(CGRect(x: x1, y: 0, width: max(1, x2 - x1), height: size.height)),
+                     with: .color(Color.green.opacity(0.16)))
         }
 
-        // ── Barras RGB ─────────────────────────────────────────────────────
-        for i in 0..<totalBars {
-            let offset  = Double(i - halfBars)
-            let beatPos = currentBeat + offset / barsPerBeat
-            let x       = CGFloat(i) * barW + barW / 2.0
-            let isPast  = offset < 0
-            let normDist = abs(offset) / Double(halfBars)
-            let isCurrent = i == halfBars
-
-            // Tres bandas de frecuencia procedurales
-            let bass = bandHeight(beat: beatPos, seed: trackSeed, freqA: 0.50, freqB: 1.03, phaseA: 0.017, phaseB: 0.031)
-            let mid  = bandHeight(beat: beatPos, seed: trackSeed, freqA: 2.13, freqB: 3.07, phaseA: 0.011, phaseB: 0.019)
-            let hi   = bandHeight(beat: beatPos, seed: trackSeed, freqA: 4.27, freqB: 6.11, phaseA: 0.007, phaseB: 0.009)
-
-            let totalH = size.height * 0.90
-            let bassH  = CGFloat(bass) * totalH * 0.50   // graves ocupan la mitad inferior
-            let midH   = CGFloat(mid)  * totalH * 0.35
-            let hiH    = CGFloat(hi)   * totalH * 0.25
-
-            let fade: Double = isCurrent ? 1.0 : (isPast ? (0.55 + (1 - normDist) * 0.45) : (0.15 + (1 - normDist) * 0.30))
-            let bw   = barW * 0.82
-            let bx   = x - bw / 2.0
-
-            // Graves (rojo) — base centrada
-            let bassRect = CGRect(x: bx, y: midY - bassH / 2, width: bw, height: bassH)
-            ctx.fill(Path(roundedRect: bassRect, cornerRadius: 1.0),
-                     with: .color(Color(red: 1, green: 0.18, blue: 0.18).opacity(fade * 0.85)))
-
-            // Medios (verde) — superpuesto, más estrecho
-            let midRect  = CGRect(x: bx + bw * 0.10, y: midY - midH / 2, width: bw * 0.80, height: midH)
-            ctx.fill(Path(roundedRect: midRect, cornerRadius: 0.8),
-                     with: .color(Color(red: 0.18, green: 1, blue: 0.35).opacity(fade * 0.75)))
-
-            // Agudos (cian) — más estrecho aún, sólo picos
-            let hiRect   = CGRect(x: bx + bw * 0.22, y: midY - hiH / 2, width: bw * 0.56, height: hiH)
-            ctx.fill(Path(roundedRect: hiRect, cornerRadius: 0.7),
-                     with: .color(Color(red: 0.15, green: 0.90, blue: 1.00).opacity(fade * 0.65)))
-
-            // Rayita de downbeat (cada 4 beats)
-            let beatMod4   = beatPos.truncatingRemainder(dividingBy: 4.0)
-            let isDownbeat = beatMod4 >= 0 && beatMod4 < (1.0 / barsPerBeat)
-            if isDownbeat && !isCurrent {
-                let tickH: CGFloat = 6
-                let tick = CGRect(x: x - 0.5, y: size.height - tickH, width: 1, height: tickH)
-                ctx.fill(Path(tick), with: .color(Color.white.opacity(isPast ? 0.50 : 0.22)))
-            }
+        for i in 0..<nBars {
+            let frac = (Double(i) + 0.5) / Double(nBars)
+            let t = duration > 0 ? frac * duration : 0
+            let x = CGFloat(i) * barW + barW / 2
+            drawBeatGridLine(ctx: ctx, x: x, size: size, time: t)
+            let isPast = hasTimeline && frac < prog
+            let (bass, mid, hi) = bandsAt(time: t)
+            drawRGBBar(ctx: ctx, x: x, barW: barW, midY: midY, maxH: maxH,
+                       bass: bass, mid: mid, hi: hi, fade: isPast ? 0.95 : 0.68)
         }
 
-        // ── Línea del playhead ─────────────────────────────────────────────
+        if hasTimeline {
+            drawPlayhead(ctx: ctx, x: playX, size: size)
+        }
+        if let cue = cuePositionFraction {
+            strokeMarker(ctx: ctx, x: CGFloat(cue) * size.width, size: size, color: Color.orange)
+        }
+    }
+
+    // MARK: - Bandas RGB
+
+    private func bandsAt(time t: Double) -> (Double, Double, Double) {
+        if !peaks.isEmpty, durationSeconds > 0 {
+            let amp = peakAt(time: t)
+            return rgbFromPeak(amp, time: t)
+        }
+        let beat: Double
+        if bpm > 20 {
+            beat = t * bpm / 60.0
+        } else {
+            // Sin BPM real no inventamos 120: fase por tiempo, estable por seed.
+            beat = t * 2.0
+        }
+        let bass = bandHeight(beat: beat, seed: trackSeed, freqA: 0.50, freqB: 1.03, phaseA: 0.017, phaseB: 0.031)
+        let mid  = bandHeight(beat: beat, seed: trackSeed, freqA: 2.13, freqB: 3.07, phaseA: 0.011, phaseB: 0.019)
+        let hi   = bandHeight(beat: beat, seed: trackSeed, freqA: 4.27, freqB: 6.11, phaseA: 0.007, phaseB: 0.009)
+        if durationSeconds > 0 && (t < 0 || t > durationSeconds) {
+            return (bass * 0.12, mid * 0.12, hi * 0.12)
+        }
+        return (bass, mid, hi)
+    }
+
+    private func peakAt(time t: Double) -> Float {
+        let n = peaks.count
+        guard n > 1, durationSeconds > 0 else { return peaks.first ?? 0 }
+        if t < 0 || t > durationSeconds { return 0 }
+        let x = (t / durationSeconds) * Double(n - 1)
+        return interpPeak(x)
+    }
+
+    private func interpPeak(_ x: Double) -> Float {
+        let n = peaks.count
+        guard n > 0 else { return 0 }
+        if x < 0 || x > Double(n - 1) { return 0 }
+        let i = min(n - 1, max(0, Int(x)))
+        let j = min(n - 1, i + 1)
+        let t = Float(x - Double(i))
+        return peaks[i] + (peaks[j] - peaks[i]) * t
+    }
+
+    private func rgbFromPeak(_ p: Float, time t: Double) -> (Double, Double, Double) {
+        let a = Double(max(0, min(1, p)))
+        let spark = abs(sin(t * 18.7 + Double(trackSeed % 97) * 0.1))
+        return (
+            min(1, a * 1.05),
+            min(1, a * 0.72 + spark * 0.10 * a),
+            min(1, a * 0.38 + spark * 0.22 * a)
+        )
+    }
+
+    /// Graves en el eje, medios encima, agudos en el borde (espejo vertical).
+    private func drawRGBBar(
+        ctx: GraphicsContext,
+        x: CGFloat, barW: CGFloat, midY: CGFloat, maxH: CGFloat,
+        bass: Double, mid: Double, hi: Double, fade: Double
+    ) {
+        let bw = max(1, barW * 0.84)
+        let bx = x - bw / 2
+        let bassH = CGFloat(bass) * maxH * 0.48
+        let midH  = CGFloat(mid)  * maxH * 0.30
+        let hiH   = CGFloat(hi)   * maxH * 0.20
+
+        func pair(_ yOff: CGFloat, _ h: CGFloat, _ color: Color) {
+            guard h > 0.35 else { return }
+            let top = CGRect(x: bx, y: midY - yOff - h, width: bw, height: h)
+            let bot = CGRect(x: bx, y: midY + yOff, width: bw, height: h)
+            ctx.fill(Path(top), with: .color(color.opacity(fade)))
+            ctx.fill(Path(bot), with: .color(color.opacity(fade * 0.92)))
+        }
+
+        pair(0, bassH, Theme.wfBass)
+        pair(bassH, midH, Theme.wfMid)
+        pair(bassH + midH, hiH, Theme.wfHigh)
+    }
+
+    private func drawBeatGridLine(ctx: GraphicsContext, x: CGFloat, size: CGSize, time t: Double) {
+        guard bpm > 20, t >= 0 else { return }
+        let beat = t * bpm / 60.0
+        let beatMod = beat.truncatingRemainder(dividingBy: 1.0)
+        let wrapped = beatMod < 0 ? beatMod + 1 : beatMod
+        let beatWidth = (windowSeconds / Double(totalBars)) * bpm / 60.0
+        let slop = max(0.06, min(0.22, beatWidth * 0.45))
+        guard wrapped < slop || wrapped > (1 - slop) else { return }
+        let barMod = beat.truncatingRemainder(dividingBy: 4.0)
+        let barWrapped = barMod < 0 ? barMod + 4 : barMod
+        let isDownbeat = barWrapped < slop || barWrapped > (4 - slop)
+        let isCurrent = beatInBar > 0 && Int(barWrapped) + 1 == beatInBar && isDownbeat
+        ctx.fill(
+            Path(CGRect(x: x, y: 0, width: 1, height: size.height)),
+            with: .color(Theme.wfBass.opacity(isCurrent ? 0.50 : (isDownbeat ? 0.34 : 0.10)))
+        )
+    }
+
+    private func drawPlayhead(ctx: GraphicsContext, x: CGFloat, size: CGSize) {
         var ph = Path()
-        ph.move(to:    CGPoint(x: midX, y: 0))
-        ph.addLine(to: CGPoint(x: midX, y: size.height))
-        ctx.stroke(ph, with: .color(.white.opacity(0.92)), lineWidth: 1.5)
+        ph.move(to: CGPoint(x: x, y: 0))
+        ph.addLine(to: CGPoint(x: x, y: size.height))
+        ctx.stroke(ph, with: .color(.white.opacity(isPlaying ? 0.98 : 0.78)), lineWidth: isPlaying ? 1.8 : 1.4)
 
-        // Triángulo superior
-        let tri = Path { p in
-            p.move(to:    CGPoint(x: midX - 5, y: 0))
-            p.addLine(to: CGPoint(x: midX + 5, y: 0))
-            p.addLine(to: CGPoint(x: midX,     y: 8))
+        let top = Path { p in
+            p.move(to: CGPoint(x: x - 5, y: 0))
+            p.addLine(to: CGPoint(x: x + 5, y: 0))
+            p.addLine(to: CGPoint(x: x, y: 7))
             p.closeSubpath()
         }
-        ctx.fill(tri, with: .color(.white))
+        ctx.fill(top, with: .color(.white))
 
-        // ── Marcador de cue (naranja) ──────────────────────────────────────
-        if let cueFrac = cuePositionFraction {
-            let cueBeat = cueFrac * totalBeats
-            let cx = xForBeat(cueBeat, current: currentBeat, barW: barW, halfBars: halfBars, size: size)
-            if cx >= 0 && cx <= size.width {
-                var cp = Path()
-                cp.move(to:    CGPoint(x: cx, y: 0))
-                cp.addLine(to: CGPoint(x: cx, y: size.height))
-                ctx.stroke(cp, with: .color(Color.orange.opacity(0.90)), lineWidth: 2)
-                // Pequeño marcador triangular superior
-                let ct = Path { p in
-                    p.move(to:    CGPoint(x: cx - 5, y: 0))
-                    p.addLine(to: CGPoint(x: cx + 5, y: 0))
-                    p.addLine(to: CGPoint(x: cx,     y: 7))
-                    p.closeSubpath()
-                }
-                ctx.fill(ct, with: .color(Color.orange))
-            }
+        let bot = Path { p in
+            p.move(to: CGPoint(x: x - 5, y: size.height))
+            p.addLine(to: CGPoint(x: x + 5, y: size.height))
+            p.addLine(to: CGPoint(x: x, y: size.height - 7))
+            p.closeSubpath()
+        }
+        ctx.fill(bot, with: .color(.white))
+    }
+
+    private func drawLoopScrolling(ctx: GraphicsContext, size: CGSize, elapsed: Double, secPerBar: Double, shift: CGFloat, barW: CGFloat) {
+        guard let loopIn = loopInFraction, let loopOut = loopOutFraction, loopIn < loopOut, durationSeconds > 0 else { return }
+        let x1 = xForTime(loopIn * durationSeconds, elapsed: elapsed, secPerBar: secPerBar, shift: shift, barW: barW)
+        let x2 = xForTime(loopOut * durationSeconds, elapsed: elapsed, secPerBar: secPerBar, shift: shift, barW: barW)
+        if x2 > x1 {
+            ctx.fill(Path(CGRect(x: x1, y: 0, width: x2 - x1, height: size.height)),
+                     with: .color(Color.green.opacity(0.16)))
+            ctx.fill(Path(CGRect(x: x1, y: 0, width: 1.5, height: size.height)),
+                     with: .color(Color.green.opacity(0.80)))
+            ctx.fill(Path(CGRect(x: x2 - 1.5, y: 0, width: 1.5, height: size.height)),
+                     with: .color(Color.green.opacity(0.80)))
         }
     }
 
-    // MARK: - Helpers
-
-    /// Convierte una posición en beats a coordenada X en la vista.
-    private func xForBeat(_ beat: Double, current: Double, barW: CGFloat, halfBars: Int, size: CGSize) -> CGFloat {
-        let offset = (beat - current) * barsPerBeat
-        let barIndex = Double(halfBars) + offset
-        return CGFloat(barIndex) * barW + barW / 2.0
+    private func drawCueScrolling(ctx: GraphicsContext, size: CGSize, elapsed: Double, secPerBar: Double, shift: CGFloat, barW: CGFloat) {
+        guard let cueFrac = cuePositionFraction, durationSeconds > 0 else { return }
+        let cx = xForTime(cueFrac * durationSeconds, elapsed: elapsed, secPerBar: secPerBar, shift: shift, barW: barW)
+        guard cx >= 0 && cx <= size.width else { return }
+        strokeMarker(ctx: ctx, x: cx, size: size, color: Color.orange)
     }
 
-    /// Altura de una banda de frecuencia determinista en [0.06, 1].
+    private func strokeMarker(ctx: GraphicsContext, x: CGFloat, size: CGSize, color: Color) {
+        var cp = Path()
+        cp.move(to: CGPoint(x: x, y: 0))
+        cp.addLine(to: CGPoint(x: x, y: size.height))
+        ctx.stroke(cp, with: .color(color.opacity(0.90)), lineWidth: 2)
+        let ct = Path { p in
+            p.move(to: CGPoint(x: x - 5, y: 0))
+            p.addLine(to: CGPoint(x: x + 5, y: 0))
+            p.addLine(to: CGPoint(x: x, y: 7))
+            p.closeSubpath()
+        }
+        ctx.fill(ct, with: .color(color))
+    }
+
+    private func xForTime(_ t: Double, elapsed: Double, secPerBar: Double, shift: CGFloat, barW: CGFloat) -> CGFloat {
+        let offsetBars = (t - elapsed) / secPerBar
+        return CGFloat(Double(halfBars) + offsetBars) * barW + barW / 2 - shift
+    }
+
     private func bandHeight(beat: Double, seed: Int, freqA: Double, freqB: Double, phaseA: Double, phaseB: Double) -> Double {
         let s = Double(abs(seed % 997) + 1)
         let a = abs(sin(beat * freqA + s * phaseA)) * 0.55
         let b = abs(sin(beat * freqB + s * phaseB)) * 0.35
         let c = abs(sin(beat * (freqA + freqB) * 0.5 + s * (phaseA + phaseB))) * 0.10
         return min(1.0, max(0.06, a + b + c))
-    }
-
-    // MARK: - Gradientes laterales
-
-    private var edgeFade: some View {
-        HStack(spacing: 0) {
-            LinearGradient(colors: [Color.black.opacity(0.60), .clear],
-                           startPoint: .leading, endPoint: .trailing).frame(width: 36)
-            Spacer()
-            LinearGradient(colors: [.clear, Color.black.opacity(0.60)],
-                           startPoint: .leading, endPoint: .trailing).frame(width: 36)
-        }
-        .allowsHitTesting(false)
     }
 }

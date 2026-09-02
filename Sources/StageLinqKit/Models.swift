@@ -65,6 +65,9 @@ public final class StageLinqDevice: ObservableObject, Identifiable {
     @Published public var masterTempo: Double = 0
     @Published public var playerNumber: Int = 0
 
+    /// No @Published: se actualiza en cada HOWDY y no debe redibujar SwiftUI.
+    public var lastSeen: Date = Date()
+
     public let decks: [DeckState] = (1...4).map { DeckState(id: $0) }
 
     public enum ConnectionState: Equatable {

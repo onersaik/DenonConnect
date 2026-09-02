@@ -239,7 +239,12 @@ public final class TCPConnection {
     }
 
     public func setReadTimeout(seconds: Int) {
-        var tv = timeval(tv_sec: seconds, tv_usec: 0)
+        setReadTimeout(milliseconds: max(0, seconds) * 1000)
+    }
+
+    public func setReadTimeout(milliseconds: Int) {
+        let ms = max(0, milliseconds)
+        var tv = timeval(tv_sec: ms / 1000, tv_usec: suseconds_t((ms % 1000) * 1000))
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
     }
 

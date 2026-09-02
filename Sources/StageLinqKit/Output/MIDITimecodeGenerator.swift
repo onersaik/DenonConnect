@@ -1,6 +1,6 @@
 // MIDITimecodeGenerator.swift
 // Genera MIDI Timecode (MTC) a traves de un puerto MIDI virtual de CoreMIDI.
-// El cliente DAW (Ableton, Logic, QLab) ve el puerto "SC6000 Connect MTC"
+// El cliente DAW (Ableton, Logic, QLab) ve el puerto "STAGE CONNECT MTC"
 // y lo puede seleccionar como fuente de timecode externo.
 //
 // Protocolo: Full-Frame SysEx cada frame + Quarter-Frame messages 2x por frame.
@@ -47,10 +47,14 @@ public final class MIDITimecodeGenerator {
     private var client:     MIDIClientRef   = 0
     private var source:     MIDIEndpointRef = 0
     private var running     = false
+    private var paused      = true
     private var timer:      Timer?
 
-    private var currentFrame: Int = 0
-    private var qfPiece:      Int = 0
+    private var currentFrame:    Int    = 0
+    private var playheadSeconds: Double = 0
+    private var lastQFTime:      TimeInterval = 0
+    private var qfPiece:         Int    = 0
+    private var pendingFullFrame = true
 
     // MARK: Init / Deinit
 
@@ -68,13 +72,13 @@ public final class MIDITimecodeGenerator {
         stateLock.unlock()
 
         let clientStatus = MIDIClientCreateWithBlock(
-            "SC6000Connect" as CFString, &client
+            "STAGE CONNECT" as CFString, &client
         ) { _ in }
         guard clientStatus == noErr else {
             throw MTCError.clientCreateFailed(clientStatus)
         }
 
-        let srcStatus = MIDISourceCreate(client, "SC6000 Connect MTC" as CFString, &source)
+        let srcStatus = MIDISourceCreate(client, "STAGE CONNECT MTC" as CFString, &source)
         guard srcStatus == noErr else {
             MIDIClientDispose(client)
             client = 0
@@ -83,6 +87,10 @@ public final class MIDITimecodeGenerator {
 
         stateLock.lock()
         running = true
+        paused = true
+        qfPiece = 0
+        lastQFTime = ProcessInfo.processInfo.systemUptime
+        pendingFullFrame = true
         stateLock.unlock()
 
         let interval = 1.0 / (frameRate.rawValue * 4.0)
@@ -92,7 +100,7 @@ public final class MIDITimecodeGenerator {
         RunLoop.main.add(t, forMode: .common)
         timer = t
 
-        log("[MTC] Puerto virtual 'SC6000 Connect MTC' activo -- \(Int(frameRate.rawValue)) fps")
+        log("[MTC] Puerto virtual 'STAGE CONNECT MTC' activo -- \(Int(frameRate.rawValue)) fps")
     }
 
     public func stop() {
@@ -111,15 +119,38 @@ public final class MIDITimecodeGenerator {
     }
 
     public func seek(toSeconds seconds: Double) {
+        applyPlayhead(seconds: seconds, playing: nil)
+    }
+
+    /// El MTC es el playhead de la pista, no un reloj que arranca al armar.
+    public func applyPlayhead(seconds: Double, playing: Bool? = nil) {
+        let safe = seconds.isFinite ? max(0, seconds) : 0
         stateLock.lock()
-        currentFrame = max(0, Int(seconds * frameRate.rawValue))
-        qfPiece = 0
+        let fps = frameRate.rawValue
+        let frame = LTCGenerator.frameNumber(seconds: safe, fps: fps)
+        let wasPaused = paused
+        if let playing { paused = !playing }
+        playheadSeconds = safe
+        let delta = frame - currentFrame
+        let jumped = abs(delta) > 1
+        let pauseChanged = wasPaused != paused
+        currentFrame = max(0, frame)
+        if jumped || pauseChanged { qfPiece = 0 }
+        lastQFTime = ProcessInfo.processInfo.systemUptime
+        let shouldFullFrame = jumped || pauseChanged || pendingFullFrame
+        pendingFullFrame = false
         stateLock.unlock()
-        sendFullFrame()
+        if shouldFullFrame { sendFullFrame() }
+    }
+
+    public func setPaused(_ value: Bool) {
+        stateLock.lock()
+        paused = value
+        stateLock.unlock()
     }
 
     public func currentPositionSeconds() -> Double {
-        stateLock.withLock { Double(currentFrame) / frameRate.rawValue }
+        stateLock.withLock { playheadSeconds }
     }
 
     // MARK: Envio de mensajes
@@ -140,7 +171,12 @@ public final class MIDITimecodeGenerator {
 
     private func sendNextQuarterFrame() {
         stateLock.lock()
-        guard running else { stateLock.unlock(); return }
+        guard running, !paused else { stateLock.unlock(); return }
+        let now = ProcessInfo.processInfo.systemUptime
+        if lastQFTime == 0 { lastQFTime = now }
+        playheadSeconds += max(0, now - lastQFTime)
+        lastQFTime = now
+        currentFrame = LTCGenerator.frameNumber(seconds: playheadSeconds, fps: frameRate.rawValue)
         let frame = currentFrame
         let piece = qfPiece
         let fps   = frameRate
@@ -163,7 +199,6 @@ public final class MIDITimecodeGenerator {
 
         stateLock.lock()
         qfPiece = (qfPiece + 1) % 8
-        if qfPiece == 0 { currentFrame += 1 }
         stateLock.unlock()
     }
 

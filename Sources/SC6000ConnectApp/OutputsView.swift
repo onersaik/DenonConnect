@@ -39,7 +39,7 @@ struct OutputsView: View {
             Divider().background(Theme.panelBorder)
             content
         }
-        .frame(width: 640, height: 560)
+        .frame(width: 680, height: 640)
         .background(Theme.background)
     }
 
@@ -52,11 +52,14 @@ struct OutputsView: View {
                 Image(systemName: "gearshape.2.fill")
                     .font(.system(size: 22))
                     .foregroundColor(Theme.accent)
-                Text("AJUSTES")
+                Text("CONFIG")
                     .font(.system(size: 13, weight: .bold))
                     .tracking(1.0)
                     .foregroundColor(Theme.textPrimary)
-                Text("SC6000 Connect")
+                Text("AJUSTES")
+                    .font(.system(size: 10))
+                    .foregroundColor(Theme.textTertiary)
+                Text("STAGE CONNECT")
                     .font(.system(size: 10))
                     .foregroundColor(Theme.textTertiary)
             }
@@ -90,7 +93,7 @@ struct OutputsView: View {
                     .foregroundColor(active ? Theme.textPrimary : Theme.textSecondary)
                 Spacer()
                 // Indicador activo
-                if s == .ltc && outputs.ltcEnabled   { dot(Theme.cyan) }
+                if s == .ltc && outputs.ltcAnyEnabled { dot(Theme.cyan) }
                 if s == .mtc && outputs.mtcEnabled   { dot(Theme.purple) }
                 if s == .osc && outputs.resolumeEnabled { dot(Theme.accent) }
                 if s == .web && outputs.webEnabled   { dot(Theme.ledGreen) }
@@ -152,16 +155,39 @@ struct OutputsView: View {
 
     private var ltcSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            sectionHeader(icon: "waveform.path", title: "SMPTE LTC por audio",
-                          subtitle: "Genera timecode como señal de audio. Usa BlackHole o Loopback para enviarlo a otra app; salida física para sincronizar con otro equipo.")
+            sectionHeader(icon: "waveform.path", title: "SMPTE LTC",
+                          subtitle: "Master: un LTC de casa que sigue al deck master, On Air o el que está sonando. Por reproductor: cada fila tiene su generador y su salida. Apagar un botón corta ese generador; no reactiva el auto-follow.")
 
-            // Timecode display
             Text(outputs.ltcTimecode)
                 .font(.system(size: 32, weight: .bold, design: .monospaced))
                 .foregroundColor(outputs.ltcEnabled ? Theme.ledGreen : Theme.textTertiary.opacity(0.4))
 
+            Text("MASTER")
+                .font(.system(size: 10, weight: .bold))
+                .tracking(0.8)
+                .foregroundColor(Theme.textTertiary)
+
             settingsPanel {
-                // Frame rate
+                labelRow(label: "Activar Master") {
+                    Toggle("", isOn: Binding(
+                        get: { outputs.ltcEnabled },
+                        set: { want in
+                            if want { outputs.startMasterLTC() } else { outputs.stopMasterLTC() }
+                        }
+                    ))
+                    .toggleStyle(.checkbox)
+                    .labelsHidden()
+                }
+                Divider().background(Theme.panelBorder)
+                labelRow(label: "Auto (fader)") {
+                    Toggle("", isOn: Binding(
+                        get: { outputs.ltcAutoFollow },
+                        set: { outputs.setAutoFollow($0) }
+                    ))
+                    .toggleStyle(.checkbox)
+                    .labelsHidden()
+                }
+                Divider().background(Theme.panelBorder)
                 labelRow(label: "Frame rate") {
                     Picker("", selection: $outputs.ltcFrameRate) {
                         ForEach(LTCGenerator.FrameRate.allCases, id: \.self) { r in
@@ -169,40 +195,112 @@ struct OutputsView: View {
                         }
                     }
                     .pickerStyle(.segmented)
-                    .disabled(outputs.ltcEnabled)
                     .frame(width: 210)
                     .labelsHidden()
+                    .onChange(of: outputs.ltcFrameRate) { _ in
+                        outputs.applyMasterFrameRateChange()
+                    }
                 }
-
                 Divider().background(Theme.panelBorder)
-
-                // Dispositivo de salida
-                labelRow(label: "Salida de audio") {
+                labelRow(label: "Salida Master") {
                     Picker("", selection: $outputs.ltcSelectedDeviceID) {
                         ForEach(outputs.ltcDevices) { dev in
                             Text(dev.name).tag(dev.id)
                         }
                     }
                     .pickerStyle(.menu)
-                    .disabled(outputs.ltcEnabled)
                     .font(.system(size: 11))
-                    .frame(maxWidth: 210)
+                    .frame(maxWidth: 240)
                     .labelsHidden()
+                    .onChange(of: outputs.ltcSelectedDeviceID) { _ in
+                        outputs.applyMasterDeviceChange()
+                    }
                 }
             }
 
+            Text("Al cambiar el master (LED Master, On Air o fader) el LTC salta al playhead del nuevo deck, no reinicia el reloj. Play 1×, pausa congela, seek salta. Primer frame = playhead real.")
+                .font(.system(size: 10))
+                .foregroundColor(Theme.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text("POR REPRODUCTOR")
+                .font(.system(size: 10, weight: .bold))
+                .tracking(0.8)
+                .foregroundColor(Theme.textTertiary)
+                .padding(.top, 4)
+
+            Text("Un dispositivo CoreAudio por generador. Dos LTC en el mismo canal se pisan. Si el Mac no abre varios a la vez, usa Master en uno y un deck en otro (BlackHole / Loopback / interfaz).")
+                .font(.system(size: 10))
+                .foregroundColor(Theme.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if outputs.ltcDeckSlots.isEmpty {
+                Text("No hay reproductores visibles. Carga una pista para asignar salidas.")
+                    .font(.system(size: 11))
+                    .foregroundColor(Theme.textTertiary)
+            } else {
+                settingsPanel {
+                    ForEach(Array(outputs.ltcDeckSlots.enumerated()), id: \.element.id) { index, slot in
+                        if index > 0 { Divider().background(Theme.panelBorder) }
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(spacing: 10) {
+                                Toggle("", isOn: Binding(
+                                    get: { outputs.isDeckLTCEnabled(slot.id) },
+                                    set: { outputs.setDeckLTCEnabled(slot.id, enabled: $0) }
+                                ))
+                                .toggleStyle(.checkbox)
+                                .labelsHidden()
+                                Text(slot.label)
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundColor(Theme.textPrimary)
+                                Spacer()
+                                Text(outputs.ltcDeckTimecode[slot.id] ?? "00:00:00:00")
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundColor(outputs.isDeckLTCEnabled(slot.id) ? Theme.ledGreen : Theme.textTertiary)
+                            }
+                            HStack {
+                                Text("Salida")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(Theme.textSecondary)
+                                    .frame(width: 110, alignment: .leading)
+                                Picker("", selection: Binding(
+                                    get: { outputs.deckDeviceBinding(slot.id) },
+                                    set: { outputs.setDeckDevice(slot.id, deviceID: $0) }
+                                )) {
+                                    ForEach(outputs.ltcDevices) { dev in
+                                        Text(dev.name).tag(dev.id)
+                                    }
+                                }
+                                .pickerStyle(.menu)
+                                .font(.system(size: 11))
+                                .frame(maxWidth: 240)
+                                .labelsHidden()
+                                Spacer()
+                            }
+                            if let err = outputs.ltcDeckError[slot.id], !err.isEmpty {
+                                Text(err)
+                                    .font(.system(size: 10))
+                                    .foregroundColor(Theme.red)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+            }
+
+            if !outputs.ltcDeviceWarning.isEmpty {
+                errorBanner(outputs.ltcDeviceWarning)
+            }
             if !outputs.ltcError.isEmpty {
                 errorBanner(outputs.ltcError)
             }
 
             HStack(spacing: 8) {
-                toggleButton(label: outputs.ltcEnabled ? "Detener" : "Activar",
+                toggleButton(label: outputs.ltcEnabled ? "Detener Master" : "Activar Master",
                              active: outputs.ltcEnabled, color: Theme.cyan) {
                     outputs.toggleLTC()
                 }
-                if !outputs.ltcEnabled {
-                    refreshButton { outputs.refreshLTCDevices() }
-                }
+                refreshButton { outputs.refreshLTCDevices() }
                 Spacer()
                 openAudioMIDIButton
             }
@@ -214,7 +312,7 @@ struct OutputsView: View {
     private var mtcSection: some View {
         VStack(alignment: .leading, spacing: 16) {
             sectionHeader(icon: "pianokeys", title: "MIDI Timecode (MTC)",
-                          subtitle: "Crea el puerto virtual MIDI 'SC6000 Connect MTC' en el sistema. Cualquier DAW o software que acepte MTC externo puede suscribirse a él.")
+                          subtitle: "Crea el puerto virtual MIDI 'STAGE CONNECT MTC' en el sistema. Cualquier DAW o software que acepte MTC externo puede suscribirse a él.")
 
             settingsPanel {
                 labelRow(label: "Frame rate") {
@@ -230,7 +328,7 @@ struct OutputsView: View {
                 }
             }
 
-            Text("El puerto aparece en Audio MIDI Setup -> Studio MIDI -> SC6000 Connect MTC.")
+            Text("El puerto aparece en Audio MIDI Setup -> Studio MIDI -> STAGE CONNECT MTC.")
                 .font(.system(size: 10))
                 .foregroundColor(Theme.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -467,10 +565,10 @@ struct OutputsView: View {
         }
         .padding(14)
         .background(
-            RoundedRectangle(cornerRadius: 10)
+            Rectangle()
                 .fill(Theme.panel)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 10)
+                    Rectangle()
                         .stroke(Theme.panelBorder, lineWidth: 1)
                 )
         )
@@ -550,7 +648,7 @@ struct OutputsView: View {
     private func exportCSV() {
         let csv = outputs.exportHistoryCSV()
         let panel = NSSavePanel()
-        panel.nameFieldStringValue = "SC6000-historial-\(formattedDate()).csv"
+        panel.nameFieldStringValue = "STAGE-CONNECT-historial-\(formattedDate()).csv"
         panel.allowedContentTypes = [.commaSeparatedText]
         if panel.runModal() == .OK, let url = panel.url {
             try? csv.write(to: url, atomically: true, encoding: .utf8)

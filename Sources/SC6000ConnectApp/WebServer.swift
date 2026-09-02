@@ -115,7 +115,7 @@ public final class WebServer {
     <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>SC6000 Connect</title>
+    <title>STAGE CONNECT</title>
     <style>
     :root{--bg:#0d0d12;--panel:#17171f;--border:#2a2a38;--accent:#f5a623;--green:#00e676;--cyan:#00bcd4;--text:#e8e8f0;--muted:#6b6b82}
     *{box-sizing:border-box;margin:0;padding:0}
@@ -142,7 +142,7 @@ public final class WebServer {
     </style>
     </head>
     <body>
-    <header><div class="dot"></div><h1>SC6000 CONNECT</h1><span style="font-size:11px;color:var(--muted)">Monitor en vivo</span></header>
+    <header><div class="dot"></div><h1>STAGE CONNECT</h1><span style="font-size:11px;color:var(--muted)">Monitor en vivo</span></header>
     <div class="grid" id="g"><p style="color:var(--muted);padding:40px 0;text-align:center">Cargando...</p></div>
     <footer>entikrecords.com</footer>
     <script>
