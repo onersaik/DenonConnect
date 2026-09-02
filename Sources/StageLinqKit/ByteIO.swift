@@ -110,6 +110,14 @@ public final class ByteWriter {
 
     public func writeInt32(_ v: Int32) { writeUInt32(UInt32(bitPattern: v)) }
 
+    public func writeUInt64(_ v: UInt64) {
+        for shift in stride(from: 56, through: 0, by: -8) {
+            data.append(UInt8((v >> UInt64(shift)) & 0xFF))
+        }
+    }
+
+    public func writeFloat64(_ v: Double) { writeUInt64(v.bitPattern) }
+
     public func writeBytes(_ b: [UInt8]) { data.append(contentsOf: b) }
     public func writeData(_ d: Data) { data.append(d) }
 

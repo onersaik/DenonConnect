@@ -117,10 +117,67 @@ public final class UDPSocket {
     }
 }
 
+/// Socket TCP de escucha, para el simulador de reproductor.
+public final class TCPListener {
+    private let fd: Int32
+    public let port: UInt16
+
+    public init(port: UInt16) throws {
+        fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
+        guard fd >= 0 else { throw SocketError.creationFailed(lastErrnoString()) }
+
+        var reuse: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout<Int32>.size))
+
+        var addr = sockaddr_in()
+        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = port.bigEndian
+        addr.sin_addr.s_addr = INADDR_ANY
+
+        let bound = withUnsafePointer(to: &addr) { ptr -> Int32 in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        guard bound == 0 else {
+            Darwin.close(fd)
+            throw SocketError.bindFailed(lastErrnoString())
+        }
+        guard listen(fd, 8) == 0 else {
+            Darwin.close(fd)
+            throw SocketError.bindFailed(lastErrnoString())
+        }
+        self.port = port
+    }
+
+    /// Espera una conexión entrante. Devuelve nil si expira el tiempo, para
+    /// poder revisar la cancelación entre intentos.
+    public func accept(timeoutSeconds: Int = 1) -> TCPConnection? {
+        var pfd = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+        guard poll(&pfd, 1, Int32(timeoutSeconds * 1000)) > 0 else { return nil }
+        let client = Darwin.accept(fd, nil, nil)
+        guard client >= 0 else { return nil }
+        return TCPConnection(acceptedFD: client)
+    }
+
+    public func close() {
+        Darwin.close(fd)
+    }
+}
+
 /// Conexión TCP simple, bloqueante, con lectura por buffer acumulado.
 public final class TCPConnection {
     private var fd: Int32 = -1
     public private(set) var isOpen = false
+
+    /// Envuelve un descriptor ya aceptado por un TCPListener.
+    public init(acceptedFD: Int32) {
+        fd = acceptedFD
+        isOpen = true
+        var tv = timeval(tv_sec: 5, tv_usec: 0)
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+    }
 
     public init(host: String, port: UInt16, timeoutSeconds: Int = 8) throws {
         fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)

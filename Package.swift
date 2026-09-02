@@ -14,5 +14,11 @@ let package = Package(
             dependencies: ["StageLinqKit"],
             path: "Sources/SC6000ConnectApp"
         ),
+        // App aparte que simula reproductores en la red, para probar sin equipo.
+        .executableTarget(
+            name: "DJSimulatorApp",
+            dependencies: ["StageLinqKit"],
+            path: "Sources/DJSimulatorApp"
+        ),
     ]
 )
