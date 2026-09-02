@@ -156,7 +156,7 @@ public final class MIDITimecodeGenerator {
         case 4: nibble = UInt8(tc.m & 0x0F)
         case 5: nibble = UInt8((tc.m >> 4) & 0x03)
         case 6: nibble = UInt8(tc.h & 0x0F)
-        case 7: nibble = UInt8(((tc.h >> 4) & 0x01) | fps.sysExType >> 1)
+        case 7: nibble = UInt8(((tc.h >> 4) & 0x01) | Int(fps.sysExType >> 1))
         default: nibble = 0
         }
         send(bytes: [0xF1, (UInt8(piece) << 4) | (nibble & 0x0F)])
