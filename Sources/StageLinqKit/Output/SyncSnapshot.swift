@@ -14,18 +14,28 @@ public struct SyncSnapshot {
     public var sourceLabel:  String
     public var trackTitle:   String?   // nil si el protocolo no lo da
     public var trackArtist:  String?
+    public var trackKey:    String?
+    public var sourceDeckID: String?   // id estable de la fila (denon-…, pioneer-…)
+    public var isMaster:     Bool
+    public var isOnAir:      Bool
 
     public init(bpm: Double, beatInBar: Int, beatCount: Int, playhead: Double?,
                 isPlaying: Bool, sourceLabel: String,
-                trackTitle: String? = nil, trackArtist: String? = nil) {
-        self.bpm         = bpm
-        self.beatInBar   = beatInBar
-        self.beatCount   = beatCount
-        self.playhead    = playhead
-        self.isPlaying   = isPlaying
-        self.sourceLabel = sourceLabel
-        self.trackTitle  = trackTitle
-        self.trackArtist = trackArtist
+                trackTitle: String? = nil, trackArtist: String? = nil,
+                trackKey: String? = nil,
+                sourceDeckID: String? = nil, isMaster: Bool = false, isOnAir: Bool = false) {
+        self.bpm           = bpm
+        self.beatInBar     = beatInBar
+        self.beatCount     = beatCount
+        self.playhead      = playhead
+        self.isPlaying     = isPlaying
+        self.sourceLabel   = sourceLabel
+        self.trackTitle    = trackTitle
+        self.trackArtist   = trackArtist
+        self.trackKey     = trackKey
+        self.sourceDeckID  = sourceDeckID
+        self.isMaster      = isMaster
+        self.isOnAir       = isOnAir
     }
 
     public static let idle = SyncSnapshot(bpm: 0, beatInBar: 0, beatCount: 0, playhead: nil, isPlaying: false, sourceLabel: "—")

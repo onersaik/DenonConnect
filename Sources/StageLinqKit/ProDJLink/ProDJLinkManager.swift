@@ -30,6 +30,9 @@ public final class ProDJLinkDevice: ObservableObject, Identifiable {
     @Published public var playModeLabel: String = "—"
     @Published public var trackLoaded: Bool = false
     @Published public var trackID: UInt32 = 0
+    @Published public var trackTitle:  String = ""
+    @Published public var trackArtist: String = ""
+    @Published public var trackKey:    String = ""
     @Published public var slotLabel: String = "—"
 
     @Published public var trackBPM: Double = 0
@@ -51,8 +54,31 @@ public final class ProDJLinkDevice: ObservableObject, Identifiable {
         return min(max(playhead / trackLength, 0), 1)
     }
 
+    /// CDJ virtual de STAGE CONNECT (player 7 / modelo propio). Nunca debe pintarse.
+    public var isOwnVirtualCDJ: Bool {
+        DJLink.isVirtualCDJ(playerNumber: playerNumber, model: model)
+    }
+
+    /// PioneerSimulator de STAGE CONNECT TEST en este Mac (misma IP, no player 7).
+    public var isLocalTestSimulator: Bool {
+        NetworkInfo.isLocalIPv4(ip) && !isOwnVirtualCDJ
+    }
+
+    /// Huella del reloj falso antiguo (130 BPM, +1.50%, 294 s).
+    public var looksLikeLegacyFakeClock: Bool {
+        DJLink.looksLikeLegacyFakeClock(
+            playerNumber: playerNumber,
+            pitchPercent: pitchPercent,
+            trackBPM: trackBPM,
+            effectiveBPM: effectiveBPM,
+            trackLength: trackLength,
+            trackID: trackID
+        )
+    }
+
     @Published public var hasStatus: Bool = false
-    @Published public var lastSeen: Date = Date()
+    /// No @Published: actualizarlo en cada paquete reventaba SwiftUI.
+    public var lastSeen: Date = Date()
 
     public init(playerNumber: Int, model: String, ip: String) {
         self.id = "cdj-\(playerNumber)-\(ip)"
@@ -65,6 +91,7 @@ public final class ProDJLinkDevice: ObservableObject, Identifiable {
 public final class ProDJLinkManager: ObservableObject {
     @Published public private(set) var devices: [ProDJLinkDevice] = []
     @Published public private(set) var logLines: [String] = []
+    @Published public private(set) var rosterRevision: UInt64 = 0
 
     private var devicesByKey: [String: ProDJLinkDevice] = [:]
     private let bookkeepingQueue = DispatchQueue(label: "com.entikrecords.sc6000connect.prodjlink.book")
@@ -74,6 +101,8 @@ public final class ProDJLinkManager: ObservableObject {
     private var statusSocket: UDPSocket?
     private var beatSocket: UDPSocket?
     private var stoppedFlag = false
+    private var loggedIgnoreKeys: Set<String> = []
+    private var metaCache: [String: DBServerMeta] = [:]
 
     public init() {}
 
@@ -94,6 +123,7 @@ public final class ProDJLinkManager: ObservableObject {
         netQueue.async { [weak self] in self?.runStatusListener() }
         netQueue.async { [weak self] in self?.runBeatListener() }
         netQueue.async { [weak self] in self?.runVirtualCDJAnnounce() }
+        netQueue.async { [weak self] in self?.runStalePrune() }
     }
 
     public func stop() {
@@ -112,11 +142,9 @@ public final class ProDJLinkManager: ObservableObject {
             log(" Pro DJ Link: escuchando presencia en UDP :\(DJLink.keepAlivePort)")
 
             while !stopped {
-                guard let (data, _) = socket.receive() else { continue }
+                guard let (data, fromIP) = socket.receive() else { continue }
                 guard let announce = DJLinkKeepAlive.parse(data) else { continue }
-                // Ignoramos nuestro propio anuncio.
-                guard announce.playerNumber != Int(DJLink.virtualPlayerNumber) else { continue }
-                handleAnnounce(announce)
+                handleAnnounce(announce, fromIP: fromIP)
             }
             socket.close()
         } catch {
@@ -124,29 +152,73 @@ public final class ProDJLinkManager: ObservableObject {
         }
     }
 
-    private func handleAnnounce(_ announce: DJLinkKeepAlive) {
-        let key = "\(announce.playerNumber)@\(announce.ip)"
+    private func noteIgnored(_ key: String, detail: String) {
+        let first: Bool = bookkeepingQueue.sync {
+            if loggedIgnoreKeys.contains(key) { return false }
+            loggedIgnoreKeys.insert(key)
+            return true
+        }
+        if first { log(" Pioneer local ignorado: \(detail)") }
+    }
+
+    private func dropDeviceIfPresent(playerNumber: Int) {
+        let key = String(playerNumber)
+        let existed: Bool = bookkeepingQueue.sync {
+            guard devicesByKey[key] != nil else { return false }
+            devicesByKey.removeValue(forKey: key)
+            return true
+        }
+        guard existed else { return }
+        DispatchQueue.main.async {
+            self.devices.removeAll { $0.playerNumber == playerNumber }
+        }
+    }
+
+    private func handleAnnounce(_ announce: DJLinkKeepAlive, fromIP: String) {
+        // Un reproductor = una fila. La IP del datagrama es la real; el campo
+        // del paquete a veces llega a 0.0.0.0 y duplicaba el dispositivo.
+        let ip = fromIP.isEmpty ? announce.ip : fromIP
+        if DJLink.isVirtualCDJ(playerNumber: announce.playerNumber, model: announce.model) {
+            return
+        }
+        if DJLink.shouldIgnoreIncomingPioneer(
+            playerNumber: announce.playerNumber, model: announce.model, ip: ip
+        ) {
+            dropDeviceIfPresent(playerNumber: announce.playerNumber)
+            noteIgnored(
+                "\(announce.playerNumber)@\(ip)",
+                detail: "\(announce.model.isEmpty ? "CDJ" : announce.model) player \(announce.playerNumber) @ \(ip)"
+            )
+            return
+        }
+        let key = String(announce.playerNumber)
         let existing: ProDJLinkDevice? = bookkeepingQueue.sync { devicesByKey[key] }
 
         if let device = existing {
-            DispatchQueue.main.async { device.lastSeen = Date() }
+            device.lastSeen = Date()
+            DispatchQueue.main.async {
+                if device.ip != ip { device.ip = ip }
+                if !announce.model.isEmpty, device.model != announce.model { device.model = announce.model }
+            }
             return
         }
 
-        let device = ProDJLinkDevice(playerNumber: announce.playerNumber, model: announce.model, ip: announce.ip)
+        let device = ProDJLinkDevice(playerNumber: announce.playerNumber, model: announce.model, ip: ip)
         bookkeepingQueue.sync { devicesByKey[key] = device }
         DispatchQueue.main.async {
-            self.devices.append(device)
-            self.devices.sort { $0.playerNumber < $1.playerNumber }
+            if !self.devices.contains(where: { $0.playerNumber == device.playerNumber }) {
+                self.devices.append(device)
+                self.devices.sort { $0.playerNumber < $1.playerNumber }
+            }
         }
-        log(" CDJ detectado: \(announce.model) · reproductor \(announce.playerNumber) @ \(announce.ip)")
+        log(" CDJ detectado: \(announce.model) · reproductor \(announce.playerNumber) @ \(ip)")
     }
 
     // MARK: - 2. Anuncio como CDJ virtual (imprescindible)
 
     private func runVirtualCDJAnnounce() {
         guard let sock = try? UDPSocket(listenPort: nil) else {
-            log("⚠ Pro DJ Link: no se pudo crear el socket de anuncio")
+            log("[AVISO] Pro DJ Link: no se pudo crear el socket de anuncio")
             return
         }
         let ipBytes = NetworkInfo.localIPv4Bytes()
@@ -209,73 +281,167 @@ public final class ProDJLinkManager: ObservableObject {
         }
     }
 
-    /// Busca el dispositivo por número de reproductor; los paquetes de beat
-    /// pueden llegar por broadcast desde una IP que no coincida exactamente.
-    private func deviceForPlayer(_ playerNumber: Int, ip: String) -> ProDJLinkDevice? {
-        let exact = bookkeepingQueue.sync { devicesByKey["\(playerNumber)@\(ip)"] }
-        if let exact { return exact }
-        return bookkeepingQueue.sync {
-            devicesByKey.values.first { $0.playerNumber == playerNumber }
+    // MARK: - 5. Caducar CDJ que ya no anuncian (Pioneer TEST al apagar)
+
+    private func runStalePrune() {
+        while !stopped {
+            Thread.sleep(forTimeInterval: 0.5)
+            let now = Date()
+            let stale: [ProDJLinkDevice] = bookkeepingQueue.sync {
+                devicesByKey.values.filter { now.timeIntervalSince($0.lastSeen) > 5.0 }
+            }
+            guard !stale.isEmpty else { continue }
+            let keys = stale.map { String($0.playerNumber) }
+            bookkeepingQueue.sync {
+                for key in keys { devicesByKey.removeValue(forKey: key) }
+            }
+            DispatchQueue.main.async {
+                self.devices.removeAll { device in
+                    stale.contains { $0.playerNumber == device.playerNumber }
+                }
+            }
+            for d in stale {
+                log(" CDJ ausente: \(d.model) · reproductor \(d.playerNumber)")
+            }
         }
+    }
+
+    /// Un CDJ se identifica por número de reproductor (1–6). No se crean
+    /// dispositivos a partir de paquetes de estado: si el keepalive paró,
+    /// un status rezagado no debe resucitar un fantasma.
+    private func deviceForPlayer(_ playerNumber: Int, ip: String, model: String = "", firmware: String = "") -> ProDJLinkDevice? {
+        if DJLink.shouldIgnoreIncomingPioneer(
+            playerNumber: playerNumber, model: model, ip: ip, firmware: firmware
+        ) {
+            dropDeviceIfPresent(playerNumber: playerNumber)
+            return nil
+        }
+        return bookkeepingQueue.sync { devicesByKey[String(playerNumber)] }
     }
 
     private func applyBeat(_ beat: DJLinkBeat, ip: String) {
         guard let target = deviceForPlayer(beat.playerNumber, ip: ip) else { return }
+        target.lastSeen = Date()
+        // Pioneer TEST: el overlay de TestLink pinta beat/playhead. Si también
+        // aplicamos el UDP, la fila parpadea (MASTER, compás, waveform).
+        if NetworkInfo.isLocalIPv4(ip) { return }
         DispatchQueue.main.async {
-            target.beatInBar = beat.beatInBar
-            target.beatPulse.toggle()
-            target.lastSeen = Date()
+            if target.beatInBar != beat.beatInBar {
+                target.beatInBar = beat.beatInBar
+                target.beatPulse.toggle()
+            }
         }
     }
 
     private func applyPosition(_ pos: DJLinkAbsolutePosition, ip: String) {
         guard let target = deviceForPlayer(pos.playerNumber, ip: ip) else { return }
+        if DJLink.looksLikeLegacyFakeClock(
+            playerNumber: pos.playerNumber,
+            pitchPercent: target.pitchPercent,
+            trackBPM: target.trackBPM,
+            effectiveBPM: target.effectiveBPM,
+            trackLength: pos.trackLength,
+            trackID: target.trackID
+        ) {
+            dropDeviceIfPresent(playerNumber: pos.playerNumber)
+            return
+        }
+        target.lastSeen = Date()
+        if NetworkInfo.isLocalIPv4(ip) { return }
         DispatchQueue.main.async {
-            target.trackLength = pos.trackLength
-            target.playhead = pos.playhead
-            target.hasPosition = true
-            target.lastSeen = Date()
+            if abs(target.trackLength - pos.trackLength) > 0.01 { target.trackLength = pos.trackLength }
+            if abs(target.playhead - pos.playhead) > 0.001 { target.playhead = pos.playhead }
+            if !target.hasPosition { target.hasPosition = true }
         }
     }
 
     private func applyStatus(_ status: CDJStatus, ip: String) {
-        let key = "\(status.playerNumber)@\(ip)"
-        var device: ProDJLinkDevice? = bookkeepingQueue.sync { devicesByKey[key] }
-
-        if device == nil {
-            // Un CDJ puede enviarnos estado antes de que hayamos visto su
-            // paquete de presencia; lo damos de alta igualmente.
-            let created = ProDJLinkDevice(playerNumber: status.playerNumber, model: status.model, ip: ip)
-            bookkeepingQueue.sync { devicesByKey[key] = created }
-            DispatchQueue.main.async {
-                self.devices.append(created)
-                self.devices.sort { $0.playerNumber < $1.playerNumber }
-            }
-            log(" CDJ con estado activo: \(status.model) · reproductor \(status.playerNumber) @ \(ip)")
-            device = created
+        if DJLink.looksLikeLegacyFakeClock(
+            playerNumber: status.playerNumber,
+            pitchPercent: status.pitchPercent,
+            trackBPM: status.trackBPM,
+            effectiveBPM: status.effectiveBPM,
+            trackID: status.trackID
+        ) {
+            dropDeviceIfPresent(playerNumber: status.playerNumber)
+            noteIgnored(
+                "fake-\(status.playerNumber)@\(ip)",
+                detail: "reloj falso 130 BPM +1.50% player \(status.playerNumber)"
+            )
+            return
         }
-
-        guard let target = device else { return }
+        // Solo se actualiza un CDJ ya descubierto por keepalive. Un status
+        // suelto (simulador parado, paquete en vuelo) no crea filas fantasma.
+        guard let target = deviceForPlayer(
+            status.playerNumber, ip: ip, model: status.model, firmware: status.firmware
+        ) else { return }
+        target.lastSeen = Date()
+        if NetworkInfo.isLocalIPv4(ip) { return }
 
         DispatchQueue.main.async {
-            target.model = status.model.isEmpty ? target.model : status.model
-            target.firmware = status.firmware
-            target.isPlaying = status.isPlaying
-            target.isMaster = status.isMaster
-            target.isSynced = status.isSynced
-            target.isOnAir = status.isOnAir
-            target.playModeLabel = status.playMode.label
-            target.trackLoaded = status.trackLoaded
-            target.trackID = status.trackID
-            target.slotLabel = status.slot.label
-            target.trackBPM = status.trackBPM
-            target.pitchPercent = status.pitchPercent
-            target.effectiveBPM = status.effectiveBPM
-            target.beatCount = status.beatCount
-            target.hasStatus = true
-            target.lastSeen = Date()
-            // El parpadeo de beat lo marcan los paquetes del puerto 50001,
-            // que llegan justo en el golpe y son mucho más precisos.
+            if !status.model.isEmpty, target.model != status.model { target.model = status.model }
+            if target.firmware != status.firmware { target.firmware = status.firmware }
+            if target.isPlaying != status.isPlaying { target.isPlaying = status.isPlaying }
+            if target.isMaster != status.isMaster { target.isMaster = status.isMaster }
+            if target.isSynced != status.isSynced { target.isSynced = status.isSynced }
+            if target.isOnAir != status.isOnAir { target.isOnAir = status.isOnAir }
+            if target.playModeLabel != status.playMode.label { target.playModeLabel = status.playMode.label }
+            if target.trackLoaded != status.trackLoaded {
+                target.trackLoaded = status.trackLoaded
+                self.rosterRevision &+= 1
+                if !status.trackLoaded {
+                    target.trackID = 0
+                    target.playhead = 0
+                    target.trackLength = 0
+                    target.hasPosition = false
+                    target.trackBPM = 0
+                    target.effectiveBPM = 0
+                    target.beatCount = 0
+                    target.trackTitle = ""; target.trackArtist = ""; target.trackKey = ""
+                }
+            }
+            if target.trackID != status.trackID {
+                let newID = status.trackID
+                target.trackID = newID
+                if newID > 0 {
+                    let ip   = target.ip
+                    let slot = status.slot.rawValue
+                    let key  = "\(ip):\(slot):\(newID)"
+                    // Acceso a caché en bookkeepingQueue para evitar data race
+                    self.bookkeepingQueue.async { [weak self, weak target] in
+                        guard let self, let target else { return }
+                        if let cached = self.metaCache[key] {
+                            DispatchQueue.main.async {
+                                guard target.trackID == newID else { return }
+                                target.trackTitle  = cached.title
+                                target.trackArtist = cached.artist
+                                target.trackKey    = cached.key
+                            }
+                        } else {
+                            self.netQueue.async { [weak self, weak target] in
+                                guard let self, let target else { return }
+                                guard let meta = DBServerClient.query(
+                                    ip: ip, slot: slot, trackID: newID) else { return }
+                                self.bookkeepingQueue.async {
+                                    self.metaCache[key] = meta
+                                }
+                                DispatchQueue.main.async {
+                                    guard target.trackID == newID else { return }
+                                    target.trackTitle  = meta.title
+                                    target.trackArtist = meta.artist
+                                    target.trackKey    = meta.key
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if target.slotLabel != status.slot.label { target.slotLabel = status.slot.label }
+            if abs(target.trackBPM - status.trackBPM) > 0.001 { target.trackBPM = status.trackBPM }
+            if abs(target.pitchPercent - status.pitchPercent) > 0.01 { target.pitchPercent = status.pitchPercent }
+            if abs(target.effectiveBPM - status.effectiveBPM) > 0.001 { target.effectiveBPM = status.effectiveBPM }
+            if target.beatCount != status.beatCount { target.beatCount = status.beatCount }
+            if !target.hasStatus { target.hasStatus = true }
         }
     }
 }

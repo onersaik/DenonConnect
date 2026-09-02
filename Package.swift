@@ -26,7 +26,11 @@ let package = Package(
         .executableTarget(
             name: "DJSimulatorApp",
             dependencies: ["StageLinqKit"],
-            path: "Sources/DJSimulatorApp"
+            path: "Sources/DJSimulatorApp",
+            linkerSettings: [
+                .linkedFramework("AVFoundation"),
+                .linkedFramework("Accelerate"),
+            ]
         ),
     ]
 )
