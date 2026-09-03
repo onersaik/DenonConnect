@@ -18,12 +18,17 @@ public struct SyncSnapshot {
     public var sourceDeckID: String?   // id estable de la fila (denon-…, pioneer-…)
     public var isMaster:     Bool
     public var isOnAir:      Bool
+    /// Pitch/vari-speed REAL reportado por el protocolo (1.0 = normal).
+    /// nil si no hay dato (p. ej. el simulador TestLink). Fuente directa y
+    /// fiable para la velocidad del tono LTC -- ver LTCGenerator.applyPlayhead.
+    public var playbackSpeed: Double?
 
     public init(bpm: Double, beatInBar: Int, beatCount: Int, playhead: Double?,
                 isPlaying: Bool, sourceLabel: String,
                 trackTitle: String? = nil, trackArtist: String? = nil,
                 trackKey: String? = nil,
-                sourceDeckID: String? = nil, isMaster: Bool = false, isOnAir: Bool = false) {
+                sourceDeckID: String? = nil, isMaster: Bool = false, isOnAir: Bool = false,
+                playbackSpeed: Double? = nil) {
         self.bpm           = bpm
         self.beatInBar     = beatInBar
         self.beatCount     = beatCount
@@ -36,6 +41,7 @@ public struct SyncSnapshot {
         self.sourceDeckID  = sourceDeckID
         self.isMaster      = isMaster
         self.isOnAir       = isOnAir
+        self.playbackSpeed = playbackSpeed
     }
 
     public static let idle = SyncSnapshot(bpm: 0, beatInBar: 0, beatCount: 0, playhead: nil, isPlaying: false, sourceLabel: "—")

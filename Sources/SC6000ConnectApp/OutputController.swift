@@ -910,7 +910,7 @@ final class OutputController: ObservableObject {
             fan.setPaused(true)
             return
         }
-        fan.applyPlayhead(seconds: playhead, playing: snap.isPlaying)
+        fan.applyPlayhead(seconds: playhead, playing: snap.isPlaying, rateHint: snap.playbackSpeed)
     }
 
     private func applyPlayhead(mtc gen: MIDITimecodeGenerator, _ snap: SyncSnapshot?) {
@@ -1393,7 +1393,8 @@ final class OutputController: ObservableObject {
             trackArtist: (overlay?.artist ?? deck.trackArtist).isEmpty ? nil : (overlay?.artist ?? deck.trackArtist),
             sourceDeckID: id,
             isMaster: overlay?.isMaster ?? deck.isMaster,
-            isOnAir: false
+            isOnAir: false,
+            playbackSpeed: overlay != nil ? nil : (deck.speed > 0 ? deck.speed : nil)
         )
     }
 
@@ -1437,7 +1438,8 @@ final class OutputController: ObservableObject {
             trackKey: trackKey,
             sourceDeckID: "pioneer-\(device.id)",
             isMaster: overlay != nil ? (overlay?.isMaster ?? false) : device.isMaster,
-            isOnAir: overlay != nil ? false : device.isOnAir
+            isOnAir: overlay != nil ? false : device.isOnAir,
+            playbackSpeed: overlay != nil ? nil : (1.0 + device.pitchPercent / 100.0)
         )
     }
 

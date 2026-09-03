@@ -182,7 +182,7 @@ public final class LTCGenerator {
     /// clavan el frame en el acto. `playing == false` congela (silencio).
     /// En play, el reloj de audio avanza; solo hard-reset si seek, pause/play
     /// o `force` (fan-out unificando engines desfasados).
-    public func applyPlayhead(seconds: Double, playing: Bool? = nil, force: Bool = false) {
+    public func applyPlayhead(seconds: Double, playing: Bool? = nil, force: Bool = false, rateHint: Double? = nil) {
         let safe = seconds.isFinite ? max(0, seconds) : 0
         let now = CFAbsoluteTimeGetCurrent()
         stateLock.lock()
@@ -201,22 +201,28 @@ public final class LTCGenerator {
             playheadSeconds = safe
             currentFrame = max(0, frame)
             loadFrameBitsLocked()
-            // Referencia nueva: no arrastrar una medicion de velocidad de
-            // antes del salto/pausa.
-            playbackRate = 1.0
             rateRefWallClock = now
             rateRefSeconds = safe
-        } else if nowPlaying {
-            // Cuanto ha avanzado el playhead REAL del reproductor frente a
-            // cuanto ha pasado el reloj de pared, entre dos actualizaciones
-            // con movimiento real. Eso es la velocidad exacta a la que hay
-            // que generar el tono LTC (pitch +8% → LTC un 8% mas rapido).
+            if rateHint == nil { playbackRate = 1.0 }
+        }
+        // Velocidad del tono LTC: si el protocolo manda el pitch/vari-speed
+        // real (StageLinq /Speed, Pro DJ Link % pitch) se usa tal cual — es
+        // la fuente fiable, no tiene el "diente de sierra" que produce medir
+        // por diferencia entre dos lecturas de una posición ya interpolada
+        // (que avanza de mas y se corrige hacia atras en cada paquete real,
+        // lo que antes hacia sonar el SMPTE "loco"). Sin pitch real (p.ej.
+        // el simulador TestLink) se cae a estimarlo por diferencia de
+        // posicion, con suavizado para no heredar ese mismo ruido.
+        if let hint = rateHint, hint.isFinite, hint > 0 {
+            playbackRate = min(4.0, max(-4.0, hint))
+        } else if nowPlaying, !hardReset {
             let dtWall = now - rateRefWallClock
             let dtSeconds = safe - rateRefSeconds
             if rateRefWallClock > 0, dtWall >= 0.05, abs(dtSeconds) > 0.0004 {
                 let measured = dtSeconds / dtWall
                 if measured.isFinite {
-                    playbackRate = min(4.0, max(-4.0, measured))
+                    let clamped = min(4.0, max(-4.0, measured))
+                    playbackRate = playbackRate * 0.7 + clamped * 0.3
                 }
                 rateRefWallClock = now
                 rateRefSeconds = safe
@@ -532,11 +538,11 @@ public final class LTCFanout {
     }
 
     /// Mismo seek/pause/play en todos los engines. Si uno se desfasó, unifica.
-    public func applyPlayhead(seconds: Double, playing: Bool) {
+    public func applyPlayhead(seconds: Double, playing: Bool, rateHint: Double? = nil) {
         let head = Self.clampedPlayhead(seconds)
         let unify = needsUnify(targetSeconds: head)
         for gen in gens {
-            gen.applyPlayhead(seconds: head, playing: playing, force: unify)
+            gen.applyPlayhead(seconds: head, playing: playing, force: unify, rateHint: rateHint)
         }
     }
 
