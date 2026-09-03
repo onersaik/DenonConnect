@@ -67,6 +67,13 @@ public final class LTCGenerator {
     private var paused              = true
     /// Segundos de playhead anclados por el tick. No es un reloj de pared.
     private var playheadSeconds:    Double = 0
+    /// Velocidad real medida del reproductor (1.0 = normal). El tono LTC
+    /// generado tiene que sonar mas rapido/lento exactamente igual que un
+    /// tape vari-speed cuando el DJ cambia el pitch — no solo la cifra en
+    /// pantalla, tambien el audio SMPTE que sale hacia luces/video externos.
+    private var playbackRate:       Double = 1.0
+    private var rateRefWallClock:   Double = 0
+    private var rateRefSeconds:     Double = 0
     private var bitsOfFrame:        [UInt8] = []
     private var bitIndex:           Int    = 0
     private var halfBitPhase:       Int    = 0
@@ -177,6 +184,7 @@ public final class LTCGenerator {
     /// o `force` (fan-out unificando engines desfasados).
     public func applyPlayhead(seconds: Double, playing: Bool? = nil, force: Bool = false) {
         let safe = seconds.isFinite ? max(0, seconds) : 0
+        let now = CFAbsoluteTimeGetCurrent()
         stateLock.lock()
         let wasPlaying = !paused
         if let playing { paused = !playing }
@@ -193,6 +201,26 @@ public final class LTCGenerator {
             playheadSeconds = safe
             currentFrame = max(0, frame)
             loadFrameBitsLocked()
+            // Referencia nueva: no arrastrar una medicion de velocidad de
+            // antes del salto/pausa.
+            playbackRate = 1.0
+            rateRefWallClock = now
+            rateRefSeconds = safe
+        } else if nowPlaying {
+            // Cuanto ha avanzado el playhead REAL del reproductor frente a
+            // cuanto ha pasado el reloj de pared, entre dos actualizaciones
+            // con movimiento real. Eso es la velocidad exacta a la que hay
+            // que generar el tono LTC (pitch +8% → LTC un 8% mas rapido).
+            let dtWall = now - rateRefWallClock
+            let dtSeconds = safe - rateRefSeconds
+            if rateRefWallClock > 0, dtWall >= 0.05, abs(dtSeconds) > 0.0004 {
+                let measured = dtSeconds / dtWall
+                if measured.isFinite {
+                    playbackRate = min(4.0, max(-4.0, measured))
+                }
+                rateRefWallClock = now
+                rateRefSeconds = safe
+            }
         }
         stateLock.unlock()
     }
@@ -339,6 +367,7 @@ public final class LTCGenerator {
         let isPaused   = paused
         let rate       = sampleRate
         let amplitude  = level
+        let rawRate    = playbackRate
         stateLock.unlock()
 
         guard isRunning else {
@@ -351,14 +380,26 @@ public final class LTCGenerator {
             return
         }
 
+        // El tono LTC tiene que sonar mas rapido/lento con el pitch real del
+        // reproductor, igual que un cabezal de cinta vari-speed: se varia el
+        // ritmo de bit (samplesPerHalfBit), no solo un contador cosmetico.
+        // Un reproductor yendo hacia atras (rawRate <= 0, backspin) no se
+        // puede codificar como LTC invertido de forma fiable: se congela el
+        // tono (no se generan bits nuevos) hasta que retoma marcha adelante,
+        // y ahi el propio applyPlayhead clava la posicion correcta al vuelo.
+        let effectiveRate = min(4.0, max(0.05, rawRate))
+        let frozen = rawRate <= 0.05
         let bitsPerSecond      = frameRate.rawValue * 80.0
-        let samplesPerHalfBit  = rate / (bitsPerSecond * 2.0)
-        let dt = rate > 0 ? 1.0 / rate : 0
+        let samplesPerHalfBit  = frozen
+            ? Double.greatestFiniteMagnitude
+            : (rate / (bitsPerSecond * 2.0)) / effectiveRate
+        let dt = (rate > 0 && !frozen) ? effectiveRate / rate : 0
         var samples = [Float](repeating: 0, count: frameCount)
 
         stateLock.lock()
         for i in 0..<frameCount {
             samples[i] = polarity * amplitude
+            guard !frozen else { continue }
             playheadSeconds += dt
             samplesIntoHalfBit += 1
             if samplesIntoHalfBit >= samplesPerHalfBit {
