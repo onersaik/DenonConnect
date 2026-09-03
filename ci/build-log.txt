@@ -5,205 +5,169 @@ Building for debugging...
 [0/12] Write SC6000ConnectApp-entitlement.plist
 [4/12] Write DJSimulatorApp-entitlement.plist
 [5/12] Write swift-version-76B232A4806BA581.txt
-[7/30] Emitting module StageLinqKit
-[8/38] Compiling StageLinqKit PioneerSimulator.swift
-/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/SoftwareDJ/SoftwareDJManager.swift:434:17: warning: 'CC_MD5' was deprecated in macOS 10.15: This function is cryptographically broken and should not be used in security contexts. Clients should migrate to SHA256 (or stronger).
+[7/31] Emitting module StageLinqKit
+[8/39] Compiling StageLinqKit SyncSnapshot.swift
+[9/39] Compiling StageLinqKit DBServerClient.swift
+[10/39] Compiling StageLinqKit DJLinkProtocol.swift
+[11/39] Compiling StageLinqKit NetworkInfo.swift
+[12/39] Compiling StageLinqKit ProDJLinkManager.swift
+[13/39] Compiling StageLinqKit ProceduralWaveform.swift
+[14/39] Compiling StageLinqKit Protocol.swift
+[15/39] Compiling StageLinqKit ServiceConnection.swift
+[16/39] Compiling StageLinqKit DenonSimulator.swift
+[17/39] Compiling StageLinqKit PioneerSimulator.swift
+/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/SoftwareDJ/SoftwareDJManager.swift:482:17: warning: 'CC_MD5' was deprecated in macOS 10.15: This function is cryptographically broken and should not be used in security contexts. Clients should migrate to SHA256 (or stronger).
             _ = CC_MD5(ptr.baseAddress, CC_LONG(data.count), &out)
                 ^
-[9/38] Compiling StageLinqKit Sockets.swift
-/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/SoftwareDJ/SoftwareDJManager.swift:434:17: warning: 'CC_MD5' was deprecated in macOS 10.15: This function is cryptographically broken and should not be used in security contexts. Clients should migrate to SHA256 (or stronger).
+[18/39] Compiling StageLinqKit Sockets.swift
+/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/SoftwareDJ/SoftwareDJManager.swift:482:17: warning: 'CC_MD5' was deprecated in macOS 10.15: This function is cryptographically broken and should not be used in security contexts. Clients should migrate to SHA256 (or stronger).
             _ = CC_MD5(ptr.baseAddress, CC_LONG(data.count), &out)
                 ^
-[10/38] Compiling StageLinqKit SoftwareDJManager.swift
-/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/SoftwareDJ/SoftwareDJManager.swift:434:17: warning: 'CC_MD5' was deprecated in macOS 10.15: This function is cryptographically broken and should not be used in security contexts. Clients should migrate to SHA256 (or stronger).
+[19/39] Compiling StageLinqKit SoftwareDJManager.swift
+/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/SoftwareDJ/SoftwareDJManager.swift:482:17: warning: 'CC_MD5' was deprecated in macOS 10.15: This function is cryptographically broken and should not be used in security contexts. Clients should migrate to SHA256 (or stronger).
             _ = CC_MD5(ptr.baseAddress, CC_LONG(data.count), &out)
                 ^
-[11/38] Compiling StageLinqKit StageLinqManager.swift
-/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/SoftwareDJ/SoftwareDJManager.swift:434:17: warning: 'CC_MD5' was deprecated in macOS 10.15: This function is cryptographically broken and should not be used in security contexts. Clients should migrate to SHA256 (or stronger).
+[20/39] Compiling StageLinqKit StageLinqManager.swift
+/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/SoftwareDJ/SoftwareDJManager.swift:482:17: warning: 'CC_MD5' was deprecated in macOS 10.15: This function is cryptographically broken and should not be used in security contexts. Clients should migrate to SHA256 (or stronger).
             _ = CC_MD5(ptr.baseAddress, CC_LONG(data.count), &out)
                 ^
-[12/38] Compiling StageLinqKit StateMapService.swift
-/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/SoftwareDJ/SoftwareDJManager.swift:434:17: warning: 'CC_MD5' was deprecated in macOS 10.15: This function is cryptographically broken and should not be used in security contexts. Clients should migrate to SHA256 (or stronger).
+[21/39] Compiling StageLinqKit StateMapService.swift
+/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/SoftwareDJ/SoftwareDJManager.swift:482:17: warning: 'CC_MD5' was deprecated in macOS 10.15: This function is cryptographically broken and should not be used in security contexts. Clients should migrate to SHA256 (or stronger).
             _ = CC_MD5(ptr.baseAddress, CC_LONG(data.count), &out)
                 ^
-[13/38] Compiling StageLinqKit StatePaths.swift
-/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/SoftwareDJ/SoftwareDJManager.swift:434:17: warning: 'CC_MD5' was deprecated in macOS 10.15: This function is cryptographically broken and should not be used in security contexts. Clients should migrate to SHA256 (or stronger).
+[22/39] Compiling StageLinqKit StatePaths.swift
+/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/SoftwareDJ/SoftwareDJManager.swift:482:17: warning: 'CC_MD5' was deprecated in macOS 10.15: This function is cryptographically broken and should not be used in security contexts. Clients should migrate to SHA256 (or stronger).
             _ = CC_MD5(ptr.baseAddress, CC_LONG(data.count), &out)
                 ^
-[14/38] Compiling StageLinqKit StateValue.swift
-/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/SoftwareDJ/SoftwareDJManager.swift:434:17: warning: 'CC_MD5' was deprecated in macOS 10.15: This function is cryptographically broken and should not be used in security contexts. Clients should migrate to SHA256 (or stronger).
+[23/39] Compiling StageLinqKit StateValue.swift
+/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/SoftwareDJ/SoftwareDJManager.swift:482:17: warning: 'CC_MD5' was deprecated in macOS 10.15: This function is cryptographically broken and should not be used in security contexts. Clients should migrate to SHA256 (or stronger).
             _ = CC_MD5(ptr.baseAddress, CC_LONG(data.count), &out)
                 ^
-[15/38] Compiling StageLinqKit TestLink.swift
-/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/SoftwareDJ/SoftwareDJManager.swift:434:17: warning: 'CC_MD5' was deprecated in macOS 10.15: This function is cryptographically broken and should not be used in security contexts. Clients should migrate to SHA256 (or stronger).
+[24/39] Compiling StageLinqKit TestLink.swift
+/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/SoftwareDJ/SoftwareDJManager.swift:482:17: warning: 'CC_MD5' was deprecated in macOS 10.15: This function is cryptographically broken and should not be used in security contexts. Clients should migrate to SHA256 (or stronger).
             _ = CC_MD5(ptr.baseAddress, CC_LONG(data.count), &out)
                 ^
-[16/38] Compiling StageLinqKit SyncSnapshot.swift
-[17/38] Compiling StageLinqKit DBServerClient.swift
-[18/38] Compiling StageLinqKit DJLinkProtocol.swift
-[19/38] Compiling StageLinqKit NetworkInfo.swift
-[20/38] Compiling StageLinqKit ProDJLinkManager.swift
-[21/38] Compiling StageLinqKit Protocol.swift
-[22/38] Compiling StageLinqKit ServiceConnection.swift
-[23/38] Compiling StageLinqKit DenonSimulator.swift
-[24/38] Compiling StageLinqKit BeatInfoService.swift
+[25/39] Compiling StageLinqKit BeatInfoService.swift
 /Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:148:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
             guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
                                                                                      ^
-[25/38] Compiling StageLinqKit ByteIO.swift
+[26/39] Compiling StageLinqKit ByteIO.swift
 /Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:148:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
             guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
                                                                                      ^
-[26/38] Compiling StageLinqKit Models.swift
+[27/39] Compiling StageLinqKit Models.swift
 /Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:148:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
             guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
                                                                                      ^
-[27/38] Compiling StageLinqKit MusicalKey.swift
+[28/39] Compiling StageLinqKit MusicalKey.swift
 /Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:148:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
             guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
                                                                                      ^
-[28/38] Compiling StageLinqKit NetworkDevice.swift
+[29/39] Compiling StageLinqKit NetworkDevice.swift
 /Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:148:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
             guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
                                                                                      ^
-[29/38] Compiling StageLinqKit LTCGenerator.swift
+[30/39] Compiling StageLinqKit LTCGenerator.swift
 /Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:148:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
             guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
                                                                                      ^
-[30/38] Compiling StageLinqKit MIDITimecodeGenerator.swift
+[31/39] Compiling StageLinqKit MIDITimecodeGenerator.swift
 /Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:148:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
             guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
                                                                                      ^
-[31/38] Compiling StageLinqKit OSCClient.swift
+[32/39] Compiling StageLinqKit OSCClient.swift
 /Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:148:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
             guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
                                                                                      ^
-[32/38] Compiling StageLinqKit ResolumeBridge.swift
+[33/39] Compiling StageLinqKit ResolumeBridge.swift
 /Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:148:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
             guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
                                                                                      ^
-[33/54] Compiling DJSimulatorApp DJSimulatorApp.swift
+[34/58] Emitting module SC6000ConnectApp
+[35/66] Compiling DJSimulatorApp DJSimulatorApp.swift
 /Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:255:40: warning: reference to captured var 'self' in concurrently-executing code; this is an error in Swift 6
             DispatchQueue.main.async { self?.syncPositions() }
                                        ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:747:15: warning: 'loadValuesAsynchronously(forKeys:completionHandler:)' was deprecated in macOS 13.0: Use load(_:) instead.  For non-deprecated properties that do not have an AVAsyncProperty equivalent, continue to query these properties synchronously
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:749:15: warning: 'loadValuesAsynchronously(forKeys:completionHandler:)' was deprecated in macOS 13.0: Use load(_:) instead.  For non-deprecated properties that do not have an AVAsyncProperty equivalent, continue to query these properties synchronously
         asset.loadValuesAsynchronously(forKeys: ["commonMetadata", "metadata"]) {
               ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:751:27: warning: 'commonMetadata' was deprecated in macOS 13.0: Use load(.commonMetadata) instead
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:753:27: warning: 'commonMetadata' was deprecated in macOS 13.0: Use load(.commonMetadata) instead
         for item in asset.commonMetadata + asset.metadata {
                           ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:751:50: warning: 'metadata' was deprecated in macOS 13.0: Use load(.metadata) instead
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:753:50: warning: 'metadata' was deprecated in macOS 13.0: Use load(.metadata) instead
         for item in asset.commonMetadata + asset.metadata {
                                                  ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:757:29: warning: 'dataValue' was deprecated in macOS 13.0: Use load(.dataValue) instead
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:759:29: warning: 'dataValue' was deprecated in macOS 13.0: Use load(.dataValue) instead
             if let d = item.dataValue, d.count > 32 { return d }
                             ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:758:29: warning: 'value' was deprecated in macOS 13.0: Use load(.value) instead
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:760:29: warning: 'value' was deprecated in macOS 13.0: Use load(.value) instead
             if let d = item.value as? Data, d.count > 32 { return d }
                             ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:759:31: warning: 'value' was deprecated in macOS 13.0: Use load(.value) instead
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:761:31: warning: 'value' was deprecated in macOS 13.0: Use load(.value) instead
             if let img = item.value as? NSImage, let tiff = img.tiffRepresentation { return tiff }
                               ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:1036:27: warning: 'commonMetadata' was deprecated in macOS 13.0: Use load(.commonMetadata) instead
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:1038:27: warning: 'commonMetadata' was deprecated in macOS 13.0: Use load(.commonMetadata) instead
         let items = asset.commonMetadata + asset.metadata
                           ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:1036:50: warning: 'metadata' was deprecated in macOS 13.0: Use load(.metadata) instead
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:1038:50: warning: 'metadata' was deprecated in macOS 13.0: Use load(.metadata) instead
         let items = asset.commonMetadata + asset.metadata
                                                  ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:1052:33: warning: 'numberValue' was deprecated in macOS 13.0: Use load(.numberValue) instead
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:1054:33: warning: 'numberValue' was deprecated in macOS 13.0: Use load(.numberValue) instead
                 if let n = item.numberValue?.doubleValue, (60...220).contains(n) { bpm = n }
                                 ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:1053:38: warning: 'stringValue' was deprecated in macOS 13.0: Use load(.stringValue) instead
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:1055:38: warning: 'stringValue' was deprecated in macOS 13.0: Use load(.stringValue) instead
                 else if let s = item.stringValue {
                                      ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:1059:33: warning: 'stringValue' was deprecated in macOS 13.0: Use load(.stringValue) instead
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:1061:33: warning: 'stringValue' was deprecated in macOS 13.0: Use load(.stringValue) instead
                 if let s = item.stringValue { musKey = s.trimmingCharacters(in: .whitespacesAndNewlines) }
                                 ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:1062:33: warning: 'stringValue' was deprecated in macOS 13.0: Use load(.stringValue) instead
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:1064:33: warning: 'stringValue' was deprecated in macOS 13.0: Use load(.stringValue) instead
                 if let s = item.stringValue { genre = s.trimmingCharacters(in: .whitespacesAndNewlines) }
                                 ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:1065:33: warning: 'stringValue' was deprecated in macOS 13.0: Use load(.stringValue) instead
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:1067:33: warning: 'stringValue' was deprecated in macOS 13.0: Use load(.stringValue) instead
                 if let s = item.stringValue { album = s.trimmingCharacters(in: .whitespacesAndNewlines) }
                                 ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:1068:33: warning: 'stringValue' was deprecated in macOS 13.0: Use load(.stringValue) instead
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:1070:33: warning: 'stringValue' was deprecated in macOS 13.0: Use load(.stringValue) instead
                 if let s = item.stringValue { comment = s.trimmingCharacters(in: .whitespacesAndNewlines) }
                                 ^
-[34/54] Emitting module DJSimulatorApp
-[34/54] Write Objects.LinkFileList
-[35/54] Linking DJSimulatorApp
-[36/54] Applying DJSimulatorApp
-[38/54] Emitting module SC6000ConnectApp
-[39/54] Compiling SC6000ConnectApp ActivationView.swift
-[40/54] Compiling SC6000ConnectApp ArtworkFetcher.swift
-[41/54] Compiling SC6000ConnectApp ContentView.swift
-[42/54] Compiling SC6000ConnectApp DeckLabelStore.swift
-[43/54] Compiling SC6000ConnectApp LicenseStore.swift
-[44/54] Compiling SC6000ConnectApp LogView.swift
-[45/54] Compiling SC6000ConnectApp MappingController.swift
-[46/54] Compiling SC6000ConnectApp MonitorModel.swift
-[47/54] Compiling SC6000ConnectApp MonitorWindow.swift
-[48/54] Compiling SC6000ConnectApp OutputController.swift
-[49/54] Compiling SC6000ConnectApp OutputsView.swift
-[50/54] Compiling SC6000ConnectApp PlayerDeckRow.swift
-[51/54] Compiling SC6000ConnectApp SC6000ConnectApp.swift
-[52/60] Compiling SC6000ConnectApp Theme.swift
-/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/TracklistStore.swift:110:17: warning: left side of nil coalescing operator '??' has non-optional type 'String', so the right side is never used
-                ?? String(contentsOf: url, encoding: .isoLatin1) else {
-~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/TracklistStore.swift:255:17: warning: variable 'line' was never mutated; consider changing to 'let' constant
-            var line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-            ~~~ ^
-            let
-[53/60] Compiling SC6000ConnectApp TracklistStore.swift
-/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/TracklistStore.swift:110:17: warning: left side of nil coalescing operator '??' has non-optional type 'String', so the right side is never used
-                ?? String(contentsOf: url, encoding: .isoLatin1) else {
-~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/TracklistStore.swift:255:17: warning: variable 'line' was never mutated; consider changing to 'let' constant
-            var line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-            ~~~ ^
-            let
-[54/60] Compiling SC6000ConnectApp TracklistWindow.swift
-/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/TracklistStore.swift:110:17: warning: left side of nil coalescing operator '??' has non-optional type 'String', so the right side is never used
-                ?? String(contentsOf: url, encoding: .isoLatin1) else {
-~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/TracklistStore.swift:255:17: warning: variable 'line' was never mutated; consider changing to 'let' constant
-            var line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-            ~~~ ^
-            let
-[55/60] Compiling SC6000ConnectApp WaveformView.swift
-/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/TracklistStore.swift:110:17: warning: left side of nil coalescing operator '??' has non-optional type 'String', so the right side is never used
-                ?? String(contentsOf: url, encoding: .isoLatin1) else {
-~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/TracklistStore.swift:255:17: warning: variable 'line' was never mutated; consider changing to 'let' constant
-            var line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-            ~~~ ^
-            let
-[56/60] Compiling SC6000ConnectApp WaveformZoom.swift
-/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/TracklistStore.swift:110:17: warning: left side of nil coalescing operator '??' has non-optional type 'String', so the right side is never used
-                ?? String(contentsOf: url, encoding: .isoLatin1) else {
-~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/TracklistStore.swift:255:17: warning: variable 'line' was never mutated; consider changing to 'let' constant
-            var line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-            ~~~ ^
-            let
-[57/60] Compiling SC6000ConnectApp WebServer.swift
-/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/TracklistStore.swift:110:17: warning: left side of nil coalescing operator '??' has non-optional type 'String', so the right side is never used
-                ?? String(contentsOf: url, encoding: .isoLatin1) else {
-~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/TracklistStore.swift:255:17: warning: variable 'line' was never mutated; consider changing to 'let' constant
-            var line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-            ~~~ ^
-            let
-[57/60] Write Objects.LinkFileList
-[58/60] Linking SC6000ConnectApp
-[59/60] Applying SC6000ConnectApp
-Build complete! (32.37s)
+[36/66] Emitting module DJSimulatorApp
+[36/66] Write Objects.LinkFileList
+[37/66] Linking DJSimulatorApp
+[38/66] Applying DJSimulatorApp
+[40/66] Compiling SC6000ConnectApp SC6000ConnectApp.swift
+[41/66] Compiling SC6000ConnectApp Theme.swift
+[42/66] Compiling SC6000ConnectApp ThemeStore.swift
+[43/66] Compiling SC6000ConnectApp TracklistStore.swift
+[44/66] Compiling SC6000ConnectApp TracklistWindow.swift
+[45/66] Compiling SC6000ConnectApp WaveformView.swift
+[46/66] Compiling SC6000ConnectApp WaveformZoom.swift
+[47/66] Compiling SC6000ConnectApp WebServer.swift
+[48/66] Compiling SC6000ConnectApp LogView.swift
+[49/66] Compiling SC6000ConnectApp MappingController.swift
+[50/66] Compiling SC6000ConnectApp MonitorModel.swift
+[51/66] Compiling SC6000ConnectApp MonitorWindow.swift
+[52/66] Compiling SC6000ConnectApp NetworkRecovery.swift
+[53/66] Compiling SC6000ConnectApp OutputController.swift
+[54/66] Compiling SC6000ConnectApp OutputsView.swift
+[55/66] Compiling SC6000ConnectApp PlayerDeckRow.swift
+[56/66] Compiling SC6000ConnectApp ActivationView.swift
+[57/66] Compiling SC6000ConnectApp AppUpdateStore.swift
+[58/66] Compiling SC6000ConnectApp ArtworkFetcher.swift
+[59/66] Compiling SC6000ConnectApp ContentView.swift
+[60/66] Compiling SC6000ConnectApp DeckLabelStore.swift
+[61/66] Compiling SC6000ConnectApp FlowLayout.swift
+[62/66] Compiling SC6000ConnectApp LicenseStore.swift
+[63/66] Compiling SC6000ConnectApp LocalizationStore.swift
+[63/66] Write Objects.LinkFileList
+[64/66] Linking SC6000ConnectApp
+[65/66] Applying SC6000ConnectApp
+Build complete! (38.10s)
 === RELEASE ===
 Building for production...
 [0/8] Write sources
 [3/8] Write swift-version-76B232A4806BA581.txt
 [5/9] Compiling StageLinqKit BeatInfoService.swift
-/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/SoftwareDJ/SoftwareDJManager.swift:434:17: warning: 'CC_MD5' was deprecated in macOS 10.15: This function is cryptographically broken and should not be used in security contexts. Clients should migrate to SHA256 (or stronger).
+/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/SoftwareDJ/SoftwareDJManager.swift:482:17: warning: 'CC_MD5' was deprecated in macOS 10.15: This function is cryptographically broken and should not be used in security contexts. Clients should migrate to SHA256 (or stronger).
             _ = CC_MD5(ptr.baseAddress, CC_LONG(data.count), &out)
                 ^
 /Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:148:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
@@ -213,60 +177,53 @@ Building for production...
 /Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:255:40: warning: reference to captured var 'self' in concurrently-executing code; this is an error in Swift 6
             DispatchQueue.main.async { self?.syncPositions() }
                                        ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:747:15: warning: 'loadValuesAsynchronously(forKeys:completionHandler:)' was deprecated in macOS 13.0: Use load(_:) instead.  For non-deprecated properties that do not have an AVAsyncProperty equivalent, continue to query these properties synchronously
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:749:15: warning: 'loadValuesAsynchronously(forKeys:completionHandler:)' was deprecated in macOS 13.0: Use load(_:) instead.  For non-deprecated properties that do not have an AVAsyncProperty equivalent, continue to query these properties synchronously
         asset.loadValuesAsynchronously(forKeys: ["commonMetadata", "metadata"]) {
               ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:751:27: warning: 'commonMetadata' was deprecated in macOS 13.0: Use load(.commonMetadata) instead
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:753:27: warning: 'commonMetadata' was deprecated in macOS 13.0: Use load(.commonMetadata) instead
         for item in asset.commonMetadata + asset.metadata {
                           ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:751:50: warning: 'metadata' was deprecated in macOS 13.0: Use load(.metadata) instead
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:753:50: warning: 'metadata' was deprecated in macOS 13.0: Use load(.metadata) instead
         for item in asset.commonMetadata + asset.metadata {
                                                  ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:757:29: warning: 'dataValue' was deprecated in macOS 13.0: Use load(.dataValue) instead
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:759:29: warning: 'dataValue' was deprecated in macOS 13.0: Use load(.dataValue) instead
             if let d = item.dataValue, d.count > 32 { return d }
                             ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:758:29: warning: 'value' was deprecated in macOS 13.0: Use load(.value) instead
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:760:29: warning: 'value' was deprecated in macOS 13.0: Use load(.value) instead
             if let d = item.value as? Data, d.count > 32 { return d }
                             ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:759:31: warning: 'value' was deprecated in macOS 13.0: Use load(.value) instead
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:761:31: warning: 'value' was deprecated in macOS 13.0: Use load(.value) instead
             if let img = item.value as? NSImage, let tiff = img.tiffRepresentation { return tiff }
                               ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:1036:27: warning: 'commonMetadata' was deprecated in macOS 13.0: Use load(.commonMetadata) instead
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:1038:27: warning: 'commonMetadata' was deprecated in macOS 13.0: Use load(.commonMetadata) instead
         let items = asset.commonMetadata + asset.metadata
                           ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:1036:50: warning: 'metadata' was deprecated in macOS 13.0: Use load(.metadata) instead
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:1038:50: warning: 'metadata' was deprecated in macOS 13.0: Use load(.metadata) instead
         let items = asset.commonMetadata + asset.metadata
                                                  ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:1052:33: warning: 'numberValue' was deprecated in macOS 13.0: Use load(.numberValue) instead
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:1054:33: warning: 'numberValue' was deprecated in macOS 13.0: Use load(.numberValue) instead
                 if let n = item.numberValue?.doubleValue, (60...220).contains(n) { bpm = n }
                                 ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:1053:38: warning: 'stringValue' was deprecated in macOS 13.0: Use load(.stringValue) instead
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:1055:38: warning: 'stringValue' was deprecated in macOS 13.0: Use load(.stringValue) instead
                 else if let s = item.stringValue {
                                      ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:1059:33: warning: 'stringValue' was deprecated in macOS 13.0: Use load(.stringValue) instead
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:1061:33: warning: 'stringValue' was deprecated in macOS 13.0: Use load(.stringValue) instead
                 if let s = item.stringValue { musKey = s.trimmingCharacters(in: .whitespacesAndNewlines) }
                                 ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:1062:33: warning: 'stringValue' was deprecated in macOS 13.0: Use load(.stringValue) instead
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:1064:33: warning: 'stringValue' was deprecated in macOS 13.0: Use load(.stringValue) instead
                 if let s = item.stringValue { genre = s.trimmingCharacters(in: .whitespacesAndNewlines) }
                                 ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:1065:33: warning: 'stringValue' was deprecated in macOS 13.0: Use load(.stringValue) instead
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:1067:33: warning: 'stringValue' was deprecated in macOS 13.0: Use load(.stringValue) instead
                 if let s = item.stringValue { album = s.trimmingCharacters(in: .whitespacesAndNewlines) }
                                 ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:1068:33: warning: 'stringValue' was deprecated in macOS 13.0: Use load(.stringValue) instead
+/Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:1070:33: warning: 'stringValue' was deprecated in macOS 13.0: Use load(.stringValue) instead
                 if let s = item.stringValue { comment = s.trimmingCharacters(in: .whitespacesAndNewlines) }
                                 ^
 [6/11] Write Objects.LinkFileList
 [7/11] Linking DJSimulatorApp
 [9/11] Compiling SC6000ConnectApp ActivationView.swift
-/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/TracklistStore.swift:110:17: warning: left side of nil coalescing operator '??' has non-optional type 'String', so the right side is never used
-                ?? String(contentsOf: url, encoding: .isoLatin1) else {
-~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/Users/runner/work/DenonConnect/DenonConnect/Sources/SC6000ConnectApp/TracklistStore.swift:255:17: warning: variable 'line' was never mutated; consider changing to 'let' constant
-            var line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-            ~~~ ^
-            let
 [9/11] Write Objects.LinkFileList
 [10/11] Linking SC6000ConnectApp
-Build complete! (42.42s)
+Build complete! (59.78s)
 
-=== resultado: build=success release=success sha=def7eda6a54361901614625d109bd3138d912da9 ===
+=== resultado: build=success release=success sha=4d40d62b6de23b5a76f8daca370ea64b128956e5 ===
