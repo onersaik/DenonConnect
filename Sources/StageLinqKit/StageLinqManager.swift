@@ -17,6 +17,8 @@ public final class StageLinqManager: ObservableObject {
     /// Cambia cuando aparece/desaparece un deck con pista. ContentView no observa
     /// los DeckState anidados: sin esto la fila no nacería al cargar audio en TEST.
     @Published public private(set) var rosterRevision: UInt64 = 0
+    /// Bind UDP 51337. Vacío = OK. Si falla, la cabecera/empty state lo muestran.
+    @Published public private(set) var listenWarning: String = ""
 
     private var devicesByKey: [String: StageLinqDevice] = [:]
     private let bookkeepingQueue = DispatchQueue(label: "com.entikrecords.sc6000connect.bookkeeping")
@@ -24,7 +26,12 @@ public final class StageLinqManager: ObservableObject {
 
     private var udpListener: UDPSocket?
     private var mainConnections: [String: NetworkDeviceConnection] = [:]
+    private var serviceConnections: [String: [ServiceConnection]] = [:]
+    private var connectingKeys: Set<String> = []
+    private var serviceGeneration: [String: UInt64] = [:]
     private var stoppedFlag = false
+    /// IPs a las que ya se logueó el primer unicast de identidad (nowplaying).
+    private var loggedUnicastPeers: Set<String> = []
 
     public init() {}
 
@@ -60,9 +67,10 @@ public final class StageLinqManager: ObservableObject {
 
     private func runDiscoveryListener() {
         do {
-            let socket = try UDPSocket(listenPort: StageLinq.listenPort)
+            let socket = try UDPSocket(listenPort: StageLinq.listenPort, reuse: .shared)
             udpListener = socket
-            log(" Escuchando dispositivos StageLinq en UDP :\(StageLinq.listenPort)")
+            DispatchQueue.main.async { self.listenWarning = "" }
+            log("StageLinq: escuchando HOWDY en UDP :\(StageLinq.listenPort) (0.0.0.0)")
 
             while !stopped {
                 guard let (data, ip) = socket.receive() else { continue }
@@ -78,12 +86,18 @@ public final class StageLinqManager: ObservableObject {
             }
             socket.close()
         } catch {
-            log(" No se pudo escuchar en UDP \(StageLinq.listenPort): \(error)")
+            let hint = ListenPortReport.hint(for: StageLinq.listenPort)
+            let msg = "UDP \(StageLinq.listenPort) ocupado: \(error). \(hint)"
+            DispatchQueue.main.async { self.listenWarning = msg }
+            log(msg)
         }
     }
 
-    private func runAnnounce() {
-        let packet = DiscoveryCodec.build(
+    /// Identidad Now Playing (token SoundSwitch + `np2` / `nowplaying` / 2.2.0).
+    /// El SC6000 trata este HOWDY como cliente legítimo; port 0 = no escuchamos
+    /// TCP de vuelta, nos conectamos nosotros.
+    private func identityPacket() -> Data {
+        DiscoveryCodec.build(
             token: StageLinq.soundSwitchToken,
             source: StageLinq.identitySource,
             action: StageLinq.actionLogin,
@@ -91,12 +105,49 @@ public final class StageLinqManager: ObservableObject {
             version: StageLinq.identityVersion,
             port: 0
         )
+    }
+
+    /// Peers HOWDY de LAN a los que cabe unicast de identidad.
+    /// Excluye SIM / TEST en este Mac (localhost y nuestras IPv4) y el propio token.
+    private func lanUnicastPeers() -> [(name: String, ip: String)] {
+        bookkeepingQueue.sync {
+            devicesByKey.values.compactMap { device in
+                if device.isDenonSimulator { return nil }
+                guard NetworkInfo.isLANUnicastTarget(device.ip) else { return nil }
+                return (device.name, device.ip)
+            }
+            .sorted { $0.ip < $1.ip }
+        }
+    }
+
+    private func runAnnounce() {
+        let packet = identityPacket()
         guard let sock = try? UDPSocket(listenPort: nil) else {
             log("[WARN] No se pudo crear el socket de anuncio")
             return
         }
+        log("StageLinq: identidad \(StageLinq.identityName)/\(StageLinq.identitySource) v\(StageLinq.identityVersion) · broadcast :\(StageLinq.listenPort) + unicast a SC6000 de LAN")
         while !stopped {
             sock.send(packet, to: "255.255.255.255", port: StageLinq.listenPort)
+
+            let peers = lanUnicastPeers()
+            let liveIPs = Set(peers.map(\.ip))
+            bookkeepingQueue.sync {
+                loggedUnicastPeers = loggedUnicastPeers.intersection(liveIPs)
+            }
+            var sentIPs = Set<String>()
+            for peer in peers {
+                if !sentIPs.insert(peer.ip).inserted { continue }
+                sock.send(packet, to: peer.ip, port: StageLinq.listenPort)
+                let first: Bool = bookkeepingQueue.sync {
+                    if loggedUnicastPeers.contains(peer.ip) { return false }
+                    loggedUnicastPeers.insert(peer.ip)
+                    return true
+                }
+                if first {
+                    log("StageLinq: identidad \(StageLinq.identityName) unicast → \(peer.ip):\(StageLinq.listenPort) (\(peer.name))")
+                }
+            }
             Thread.sleep(forTimeInterval: 1.0)
         }
         sock.close()
@@ -124,6 +175,9 @@ public final class StageLinqManager: ObservableObject {
         }
         if let existing {
             existing.lastSeen = Date()
+            if existing.ip != info.address, !info.address.isEmpty {
+                log("\(info.name) mismo token por \(info.address) (ya en \(existing.ip); no se duplica)")
+            }
             return
         }
 
@@ -136,7 +190,7 @@ public final class StageLinqManager: ObservableObject {
                 self.rosterRevision &+= 1
             }
         }
-        log(" Descubierto: \(info.name) (\(info.source)) v\(info.version) @ \(info.address):\(info.port)")
+        log("Denon: \(info.name) · \(info.source) v\(info.version) @ \(info.address):\(info.port)")
 
         connectToDevice(device)
     }
@@ -156,7 +210,7 @@ public final class StageLinqManager: ObservableObject {
             Thread.sleep(forTimeInterval: 1.0)
             let now = Date()
             let stale: [StageLinqDevice] = bookkeepingQueue.sync {
-                devicesByKey.values.filter { now.timeIntervalSince($0.lastSeen) > 3.0 }
+                devicesByKey.values.filter { now.timeIntervalSince($0.lastSeen) > 8.0 }
             }
             for device in stale {
                 forget(device, reason: "sin anuncio")
@@ -169,8 +223,13 @@ public final class StageLinqManager: ObservableObject {
             let tokenKey = "tok-" + device.token.map { String(format: "%02x", $0) }.joined()
             devicesByKey.removeValue(forKey: tokenKey)
             devicesByKey.removeValue(forKey: device.id)
+            connectingKeys.remove(device.id)
+            loggedUnicastPeers.remove(device.ip)
+            serviceGeneration[device.id, default: 0] &+= 1
             mainConnections[device.id]?.stop()
             mainConnections.removeValue(forKey: device.id)
+            serviceConnections[device.id]?.forEach { $0.stop() }
+            serviceConnections.removeValue(forKey: device.id)
         }
         DispatchQueue.main.async {
             self.devices.removeAll { $0.id == device.id }
@@ -179,16 +238,58 @@ public final class StageLinqManager: ObservableObject {
         log(" Ausente: \(device.name) @ \(device.id) (\(reason))")
     }
 
+    private func deviceStillKnown(_ device: StageLinqDevice) -> Bool {
+        bookkeepingQueue.sync {
+            devicesByKey.values.contains { $0.id == device.id }
+        }
+    }
+
+    private func registerService(_ svc: ServiceConnection, device: StageLinqDevice) {
+        bookkeepingQueue.sync {
+            serviceConnections[device.id, default: []].append(svc)
+        }
+    }
+
+    private func bumpServiceGeneration(_ device: StageLinqDevice) -> UInt64 {
+        bookkeepingQueue.sync {
+            serviceConnections[device.id]?.forEach { $0.stop() }
+            serviceConnections[device.id] = []
+            let g = (serviceGeneration[device.id] ?? 0) &+ 1
+            serviceGeneration[device.id] = g
+            return g
+        }
+    }
+
+    private func currentServiceGeneration(_ device: StageLinqDevice) -> UInt64 {
+        bookkeepingQueue.sync { serviceGeneration[device.id] ?? 0 }
+    }
+
+    /// TCP al puerto anunciado en HOWDY. Independiente del unicast UDP de
+    /// identidad: `connectingKeys` evita doble connect; el unicast no toca esto.
     private func connectToDevice(_ device: StageLinqDevice) {
+        let already: Bool = bookkeepingQueue.sync {
+            if connectingKeys.contains(device.id) { return true }
+            connectingKeys.insert(device.id)
+            return false
+        }
+        if already { return }
+
         DispatchQueue.main.async { device.connectionState = .connecting }
 
         netQueue.async { [weak self] in
             guard let self else { return }
+            defer {
+                self.bookkeepingQueue.sync { _ = self.connectingKeys.remove(device.id) }
+            }
+            guard self.deviceStillKnown(device) else { return }
+
+            self.bookkeepingQueue.sync { self.mainConnections[device.id]?.stop() }
+            let generation = self.bumpServiceGeneration(device)
             let mainConn = NetworkDeviceConnection(host: device.ip, port: device.port, log: { [weak self] msg in self?.log(msg) })
             self.bookkeepingQueue.sync { self.mainConnections[device.id] = mainConn }
 
             // Cada servicio ("StateMap", "BeatInfo", ...) se conecta como mucho
-            // una vez, sin importar cuántas veces se llame a este callback.
+            // una vez por ciclo de la conexión principal.
             var startedServiceNames = Set<String>()
             var announcedConnected = false
 
@@ -199,16 +300,16 @@ public final class StageLinqManager: ObservableObject {
                         if !announcedConnected {
                             announcedConnected = true
                             device.connectionState = .connected
-                            self.log(" Conectado: \(device.name) (\(device.ip))")
+                            self.log("Conectado: \(device.name) (\(device.ip)) — StateMap/BeatInfo")
                         }
                     }
                     if let statePort = services["StateMap"], !startedServiceNames.contains("StateMap") {
                         startedServiceNames.insert("StateMap")
-                        self.netQueue.async { self.runStateMap(device: device, port: statePort) }
+                        self.netQueue.async { self.runStateMap(device: device, port: statePort, generation: generation) }
                     }
                     if let beatPort = services["BeatInfo"], !startedServiceNames.contains("BeatInfo") {
                         startedServiceNames.insert("BeatInfo")
-                        self.netQueue.async { self.runBeatInfo(device: device, port: beatPort) }
+                        self.netQueue.async { self.runBeatInfo(device: device, port: beatPort, generation: generation) }
                     }
                 }
             } catch {
@@ -216,41 +317,60 @@ public final class StageLinqManager: ObservableObject {
                     device.connectionState = .failed
                     device.errorMessage = "\(error)"
                 }
-                self.log("[WARN] \(device.name): \(error)")
-
-                self.netQueue.asyncAfter(deadline: .now() + 5) { [weak self] in
-                    guard let self, !self.stopped else { return }
-                    self.connectToDevice(device)
-                }
+                self.log("[WARN] \(device.name) TCP \(device.ip):\(device.port): \(error). Reintento (SC6000 en boot?)")
+                self.scheduleReconnect(device, delay: 2)
             }
         }
     }
 
-    private func runStateMap(device: StageLinqDevice, port: UInt16) {
-        let svc = StateMapService(host: device.ip, port: port, log: { [weak self] msg in self?.log(msg) })
-        do {
-            try svc.run { path, value in
-                DispatchQueue.main.async {
-                    let structural = path.hasSuffix("/SongLoaded") || path.hasSuffix("/SongName")
-                    StageLinqManager.applyState(device: device, path: path, value: value)
-                    if structural { self.rosterRevision &+= 1 }
-                }
-            }
-        } catch {
-            log(" StateMap desconectado (\(device.name)): \(error)")
+    private func scheduleReconnect(_ device: StageLinqDevice, delay: TimeInterval) {
+        netQueue.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, !self.stopped, self.deviceStillKnown(device) else { return }
+            self.connectToDevice(device)
         }
     }
 
-    private func runBeatInfo(device: StageLinqDevice, port: UInt16) {
-        let svc = BeatInfoService(host: device.ip, port: port, log: { [weak self] msg in self?.log(msg) })
-        do {
-            try svc.run { beatData in
-                DispatchQueue.main.async {
-                    StageLinqManager.applyBeat(device: device, beatData: beatData)
+    private func runStateMap(device: StageLinqDevice, port: UInt16, generation: UInt64) {
+        var delay: TimeInterval = 1.5
+        while !stopped && deviceStillKnown(device) && currentServiceGeneration(device) == generation {
+            let svc = StateMapService(host: device.ip, port: port, log: { [weak self] msg in self?.log(msg) })
+            registerService(svc, device: device)
+            do {
+                try svc.run { path, value in
+                    DispatchQueue.main.async {
+                        let structural = path.hasSuffix("/SongLoaded") || path.hasSuffix("/SongName")
+                        StageLinqManager.applyState(device: device, path: path, value: value)
+                        if structural { self.rosterRevision &+= 1 }
+                    }
                 }
+                return
+            } catch {
+                log("StateMap desconectado (\(device.name)): \(error). Reintento en \(Int(delay))s")
             }
-        } catch {
-            log(" BeatInfo desconectado (\(device.name)): \(error)")
+            guard !stopped && deviceStillKnown(device) && currentServiceGeneration(device) == generation else { return }
+            Thread.sleep(forTimeInterval: delay)
+            delay = min(delay + 1.5, 8)
+        }
+    }
+
+    private func runBeatInfo(device: StageLinqDevice, port: UInt16, generation: UInt64) {
+        var delay: TimeInterval = 1.5
+        while !stopped && deviceStillKnown(device) && currentServiceGeneration(device) == generation {
+            let svc = BeatInfoService(host: device.ip, port: port, log: { [weak self] msg in self?.log(msg) })
+            registerService(svc, device: device)
+            do {
+                try svc.run { beatData in
+                    DispatchQueue.main.async {
+                        StageLinqManager.applyBeat(device: device, beatData: beatData)
+                    }
+                }
+                return
+            } catch {
+                log("BeatInfo desconectado (\(device.name)): \(error). Reintento en \(Int(delay))s")
+            }
+            guard !stopped && deviceStillKnown(device) && currentServiceGeneration(device) == generation else { return }
+            Thread.sleep(forTimeInterval: delay)
+            delay = min(delay + 1.5, 8)
         }
     }
 

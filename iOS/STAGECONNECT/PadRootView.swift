@@ -44,9 +44,16 @@ struct PadRootView: View {
 
             if decks.isEmpty {
                 Spacer()
-                Text("Buscando reproductores en la red local…")
+                Text(manager.devices.isEmpty
+                     ? "Buscando reproductores en la red local…"
+                     : "conectado / esperando pista")
                     .font(.system(size: 14))
                     .foregroundColor(Theme.textSecondary)
+                Text("Mismo switch o misma red WiFi. Desactiva el aislamiento de AP.")
+                    .font(.system(size: 12))
+                    .foregroundColor(Theme.textTertiary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
                 Spacer()
             } else {
                 ScrollView {
@@ -140,8 +147,35 @@ struct PadRootView: View {
                     ))
                 }
             }
+            for device in manager.devices where !device.isDenonSimulator {
+                for deck in device.decks where deck.songLoaded {
+                    _ = deck.activityTick
+                    rows.append(PadDeck(
+                        id: "denon-\(device.id)-\(deck.id)",
+                        label: "SC6000 \(deck.id)",
+                        title: TrackNaming.cleanTitle(deck.trackTitle),
+                        artist: deck.trackArtist,
+                        key: MusicalKey.resolved(raw: deck.trackKey, title: deck.trackTitle, artist: deck.trackArtist),
+                        bpm: deck.bpm,
+                        elapsed: deck.beatProgress.flatMap { deck.trackLength > 0 ? $0 * deck.trackLength : nil },
+                        length: deck.trackLength > 0 ? deck.trackLength : nil,
+                        progress: deck.beatProgress,
+                        isPlaying: deck.playState == .playing,
+                        isMaster: deck.isMaster,
+                        beatInBar: Int(deck.currentBeat.truncatingRemainder(dividingBy: 4)) + 1,
+                        peaks: [],
+                        signalAt: deck.lastPacketAt,
+                        controlStamp: padStamp(
+                            playing: deck.playState == .playing,
+                            master: deck.isMaster,
+                            title: deck.trackTitle,
+                            extra: Int((deck.volume * 100).rounded()) &+ (deck.scratchTouch ? 17 : 0)
+                        )
+                    ))
+                }
+            }
         } else {
-            for device in manager.devices {
+            for device in manager.devices where !device.isDenonSimulator {
                 for deck in device.decks where deck.songLoaded {
                     _ = deck.activityTick
                     rows.append(PadDeck(
@@ -174,7 +208,7 @@ struct PadRootView: View {
             ?? testLink.snapshot?.firstLoadedDeck() {
             rows.append(PadDeck(
                 id: "pioneer-test",
-                label: "CDJ-3000 TEST",
+                label: "CDJ-3000 · PLAYER 2",
                 title: TrackNaming.cleanTitle(o.title),
                 artist: o.artist,
                 key: MusicalKey.resolved(raw: o.key, title: o.title, artist: o.artist),
@@ -193,10 +227,7 @@ struct PadRootView: View {
                 controlStamp: padStamp(playing: o.playing, master: o.isMaster, title: o.title)
             ))
         }
-        for device in proDJLink.devices where device.trackLoaded
-            && !device.isOwnVirtualCDJ
-            && !device.isLocalTestSimulator
-            && !device.looksLikeLegacyFakeClock {
+        for device in proDJLink.devices where device.isLANPlayerWithTrack {
             _ = device.activityTick
             rows.append(PadDeck(
                 id: "pioneer-\(device.id)",

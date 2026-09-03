@@ -40,15 +40,22 @@ public final class NetworkDeviceConnection {
         var buffer = Data()
         var requestSent = false
         var lastServiceCount = 0
-        let deadline = Date().addingTimeInterval(20)
+        var lastActivity = Date()
+        var requestSentAt = Date.distantPast
 
         while !stopped {
-            if Date() > deadline && !requestSent {
+            // El SC6000 puede anunciar HOWDY antes de tener el TCP listo.
+            // El reloj arranca con cada byte recibido, no al connect.
+            if !requestSent, Date().timeIntervalSince(lastActivity) > 25 {
+                throw SocketError.timeout
+            }
+            if requestSent, discoveredServices.isEmpty, Date().timeIntervalSince(requestSentAt) > 20 {
                 throw SocketError.timeout
             }
             guard let chunk = try c.receive(maxBytes: 8192) else {
                 continue // timeout de lectura, seguimos esperando
             }
+            lastActivity = Date()
             buffer.append(chunk)
             buffer = try drainMainMessages(buffer)
 
@@ -58,6 +65,7 @@ public final class NetworkDeviceConnection {
                 w.writeBytes(StageLinq.soundSwitchToken)
                 try c.send(w.data)
                 requestSent = true
+                requestSentAt = Date()
                 log("Solicitud de servicios enviada")
             }
 

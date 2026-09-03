@@ -24,19 +24,33 @@ struct WaveformView: View {
     var peaksMid:    [UInt8] = []
     var peaksHigh:   [UInt8] = []
     var cuePositionFraction: Double? = nil
+    var extraCueFractions: [Double] = []
     var loopInFraction:  Double? = nil
     var loopOutFraction: Double? = nil
     var mode: WaveformMode = .scrolling
-    /// Ventana visible en segundos. CDJ ~12 s.
+    /// Ventana visible en segundos. CDJ ~12 s. Más corta = más detalle; más larga = más contexto.
     var windowSeconds: Double = 12.0
+    var canvasBackground: Color = Color.black
+    var playheadColor: Color = Color.white
+
+    /// Todas las marcas de cue (memoria + pads TEST), 0…1.
+    private var allCueFractions: [Double] {
+        var out = extraCueFractions.filter { $0 >= 0 && $0 <= 1 }
+        if let c = cuePositionFraction, c >= 0, c <= 1 {
+            if !out.contains(where: { abs($0 - c) < 0.0008 }) {
+                out.append(c)
+            }
+        }
+        return out
+    }
 
     var body: some View {
         Canvas { ctx, size in
-            ctx.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Color.black))
+            ctx.fill(Path(CGRect(origin: .zero, size: size)), with: .color(canvasBackground))
             let midY = size.height / 2
             ctx.fill(
                 Path(CGRect(x: 0, y: midY - 0.4, width: size.width, height: 0.8)),
-                with: .color(Color.white.opacity(0.10))
+                with: .color(playheadColor.opacity(0.10))
             )
             if mode == .overview {
                 drawOverview(ctx: ctx, size: size)
@@ -46,7 +60,7 @@ struct WaveformView: View {
         }
         .transaction { $0.animation = nil }
         .frame(minHeight: 36)
-        .background(Color.black)
+        .background(canvasBackground)
     }
 
     // MARK: - Tiempo real de la pista
@@ -73,7 +87,8 @@ struct WaveformView: View {
     // MARK: - Scrolling: playhead al centro, scroll subpíxel
 
     private func drawScrolling(ctx: GraphicsContext, size: CGSize) {
-        let cols = max(200, Int(size.width / 1.0))
+        // CDJ-3000: barras finas, ~2.5 por pixel. Misma ventana, más barras/s.
+        let cols = max(480, Int(size.width / 0.40))
         let colW = size.width / CGFloat(cols)
         let midX = size.width / 2
         let elapsed = elapsedSeconds
@@ -106,7 +121,7 @@ struct WaveformView: View {
     // MARK: - Overview (pista completa)
 
     private func drawOverview(ctx: GraphicsContext, size: CGSize) {
-        let cols = max(200, Int(size.width / 1.0))
+        let cols = max(400, Int(size.width / 0.50))
         let colW = size.width / CGFloat(cols)
         let duration = durationSeconds
         let prog = hasTimeline ? min(max(progress ?? 0, 0), 1) : 0
@@ -131,7 +146,7 @@ struct WaveformView: View {
         if hasTimeline {
             drawPlayhead(ctx: ctx, x: playX, size: size)
         }
-        if let cue = cuePositionFraction {
+        for cue in allCueFractions {
             strokeMarker(ctx: ctx, x: CGFloat(cue) * size.width, size: size, color: Color.orange)
         }
     }
@@ -144,8 +159,8 @@ struct WaveformView: View {
 
         let midY = size.height / 2
         let maxH = size.height * 0.48
-        let gap = max(0.08, colW * 0.06)
-        let bw = max(0.55, colW - gap)
+        let gap = max(0.04, colW * 0.04)
+        let bw = max(0.32, colW - gap)
         let bx = x + gap * 0.5
 
         if hasRGB {
@@ -230,16 +245,22 @@ struct WaveformView: View {
         return Bands(low: 0, mid: 0, high: 0)
     }
 
-    /// Máximo real en la ventana de la columna. Sin interpolar senos.
+    /// Si la columna cubre varios bins: máximo real. Si es sub-bin: lerp.
     private func maxInSlice(_ arr: [UInt8], time t: Double, slice: Double) -> Float {
         let n = arr.count
         guard n > 0 else { return 0 }
         guard durationSeconds > 0 else { return Float(arr[0]) / 255.0 }
         if t + slice * 0.5 < 0 || t - slice * 0.5 > durationSeconds { return 0 }
-        let t0 = max(0, t - max(slice, 0.0001) * 0.5)
-        let t1 = min(durationSeconds, t + max(slice, 0.0001) * 0.5)
-        var i0 = Int((t0 / durationSeconds) * Double(n - 1))
-        var i1 = Int((t1 / durationSeconds) * Double(n - 1))
+        let span = max(slice, 0.0001)
+        let t0 = max(0, t - span * 0.5)
+        let t1 = min(durationSeconds, t + span * 0.5)
+        let f0 = (t0 / durationSeconds) * Double(n - 1)
+        let f1 = (t1 / durationSeconds) * Double(n - 1)
+        if f1 - f0 < 1.0 {
+            return lerpPeak(arr, at: (t / durationSeconds) * Double(n - 1))
+        }
+        var i0 = Int(f0)
+        var i1 = Int(f1)
         if i0 < 0 { i0 = 0 }
         if i1 >= n { i1 = n - 1 }
         if i1 < i0 { i1 = i0 }
@@ -250,6 +271,18 @@ struct WaveformView: View {
             i += 1
         }
         return Float(mx) / 255.0
+    }
+
+    private func lerpPeak(_ arr: [UInt8], at index: Double) -> Float {
+        let n = arr.count
+        guard n > 1 else { return Float(arr.first ?? 0) / 255.0 }
+        let clamped = min(Double(n - 1), max(0, index))
+        let i0 = Int(clamped)
+        let i1 = min(n - 1, i0 + 1)
+        let frac = Float(clamped - Double(i0))
+        let a = Float(arr[i0]) / 255.0
+        let b = Float(arr[i1]) / 255.0
+        return a + (b - a) * frac
     }
 
     private func drawBeatGridLine(ctx: GraphicsContext, x: CGFloat, size: CGSize, time t: Double, secPerCol: Double) {
@@ -267,7 +300,7 @@ struct WaveformView: View {
         let isCurrent = beatInBar > 0 && Int(barWrapped) + 1 == beatInBar
         ctx.fill(
             Path(CGRect(x: x, y: 0, width: 1, height: size.height)),
-            with: .color(Color.white.opacity(isCurrent ? 0.55 : 0.22))
+            with: .color(playheadColor.opacity(isCurrent ? 0.55 : 0.22))
         )
     }
 
@@ -275,12 +308,12 @@ struct WaveformView: View {
         var glow = Path()
         glow.move(to: CGPoint(x: x, y: 0))
         glow.addLine(to: CGPoint(x: x, y: size.height))
-        ctx.stroke(glow, with: .color(.white.opacity(0.22)), lineWidth: 5)
+        ctx.stroke(glow, with: .color(playheadColor.opacity(0.22)), lineWidth: 5)
 
         var ph = Path()
         ph.move(to: CGPoint(x: x, y: 0))
         ph.addLine(to: CGPoint(x: x, y: size.height))
-        ctx.stroke(ph, with: .color(.white.opacity(isPlaying ? 0.98 : 0.78)), lineWidth: isPlaying ? 1.6 : 1.2)
+        ctx.stroke(ph, with: .color(playheadColor.opacity(isPlaying ? 0.98 : 0.78)), lineWidth: isPlaying ? 1.6 : 1.2)
 
         let top = Path { p in
             p.move(to: CGPoint(x: x - 5, y: 0))
@@ -288,7 +321,7 @@ struct WaveformView: View {
             p.addLine(to: CGPoint(x: x, y: 7))
             p.closeSubpath()
         }
-        ctx.fill(top, with: .color(.white))
+        ctx.fill(top, with: .color(playheadColor))
 
         let bot = Path { p in
             p.move(to: CGPoint(x: x - 5, y: size.height))
@@ -296,7 +329,7 @@ struct WaveformView: View {
             p.addLine(to: CGPoint(x: x, y: size.height - 7))
             p.closeSubpath()
         }
-        ctx.fill(bot, with: .color(.white))
+        ctx.fill(bot, with: .color(playheadColor))
     }
 
     private func drawLoopScrolling(ctx: GraphicsContext, size: CGSize, elapsed: Double, secPerCol: Double, shift: CGFloat, colW: CGFloat, cols: Int) {
@@ -314,10 +347,12 @@ struct WaveformView: View {
     }
 
     private func drawCueScrolling(ctx: GraphicsContext, size: CGSize, elapsed: Double, secPerCol: Double, shift: CGFloat, colW: CGFloat, cols: Int) {
-        guard let cueFrac = cuePositionFraction, durationSeconds > 0 else { return }
-        let cx = xForTime(cueFrac * durationSeconds, elapsed: elapsed, secPerCol: secPerCol, shift: shift, colW: colW, cols: cols)
-        guard cx >= 0 && cx <= size.width else { return }
-        strokeMarker(ctx: ctx, x: cx, size: size, color: Color.orange)
+        guard durationSeconds > 0 else { return }
+        for cueFrac in allCueFractions {
+            let cx = xForTime(cueFrac * durationSeconds, elapsed: elapsed, secPerCol: secPerCol, shift: shift, colW: colW, cols: cols)
+            guard cx >= 0 && cx <= size.width else { continue }
+            strokeMarker(ctx: ctx, x: cx, size: size, color: Color.orange)
+        }
     }
 
     private func strokeMarker(ctx: GraphicsContext, x: CGFloat, size: CGSize, color: Color) {

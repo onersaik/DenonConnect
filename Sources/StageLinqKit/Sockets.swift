@@ -30,6 +30,39 @@ public enum SocketError: Error, CustomStringConvertible {
     }
 }
 
+/// Cómo compartir el puerto UDP.
+/// - `shared`: descubrimiento (50000, 51337). REUSEADDR+REUSEPORT para convivir
+///   con rekordbox u otra app. Los anuncios van por broadcast.
+/// - `unicast`: estado/beats (50001, 50002). Sin REUSEPORT: en Darwin reparte
+///   datagramas entre sockets y se pierden CDJs reales.
+public enum UDPBindReuse {
+    case shared
+    case unicast
+}
+
+public struct ListenPortReport: Equatable {
+    public var port: UInt16
+    public var ok: Bool
+    public var message: String
+
+    public init(port: UInt16, ok: Bool, message: String) {
+        self.port = port
+        self.ok = ok
+        self.message = message
+    }
+
+    public static func hint(for port: UInt16) -> String {
+        switch port {
+        case 50000, 50001, 50002:
+            return "Cierra rekordbox o otra copia de STAGE CONNECT."
+        case 51337:
+            return "Cierra otra copia de STAGE CONNECT o un cliente StageLinq."
+        default:
+            return "Otro programa está usando este puerto."
+        }
+    }
+}
+
 private func lastErrnoString() -> String {
     String(cString: strerror(errno))
 }
@@ -38,15 +71,17 @@ private func lastErrnoString() -> String {
 public final class UDPSocket {
     private let fd: Int32
 
-    public init(listenPort: UInt16?) throws {
+    public init(listenPort: UInt16?, reuse: UDPBindReuse = .shared) throws {
         fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
         guard fd >= 0 else { throw SocketError.creationFailed(lastErrnoString()) }
 
-        var reuse: Int32 = 1
-        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout<Int32>.size))
-        #if canImport(Darwin)
-        setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &reuse, socklen_t(MemoryLayout<Int32>.size))
-        #endif
+        var reuseAddr: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuseAddr, socklen_t(MemoryLayout<Int32>.size))
+        if reuse == .shared {
+            #if canImport(Darwin)
+            setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &reuseAddr, socklen_t(MemoryLayout<Int32>.size))
+            #endif
+        }
         var broadcastEnable: Int32 = 1
         setsockopt(fd, SOL_SOCKET, SO_BROADCAST, &broadcastEnable, socklen_t(MemoryLayout<Int32>.size))
         // Waveform RGB en TestLink ~45 KB; el default de recvfrom era 8 KB y recortaba el JSON.
@@ -66,9 +101,11 @@ public final class UDPSocket {
                 }
             }
             guard result == 0 else {
+                let err = errno
                 // Darwin. explícito: sin él resolvería al método close() de esta clase.
                 Darwin.close(fd)
-                throw SocketError.bindFailed(lastErrnoString())
+                let sys = String(cString: strerror(err))
+                throw SocketError.bindFailed("\(sys). \(ListenPortReport.hint(for: port))")
             }
         }
 

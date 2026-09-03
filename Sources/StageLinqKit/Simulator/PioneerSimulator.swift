@@ -48,13 +48,13 @@ public final class PioneerSimulator {
         queue.async { [weak self] in self?.runKeepAlive() }
         queue.async { [weak self] in self?.runStatus() }
         queue.async { [weak self] in self?.runBeats() }
-        log("[Pioneer] Simulador Pioneer iniciado como «\(model)» (player \(playerNumber))")
+        log("[Pioneer] Activo como «\(model)» (player \(playerNumber))")
     }
 
     public func stop() {
         stateQueue.sync { stoppedFlag = true }
         for socket in sockets { socket.close() }
-        log("[Pioneer] Simulador detenido")
+        log("[Pioneer] Detenido")
     }
 
     private func makeSocket() -> UDPSocket? {
@@ -76,6 +76,7 @@ public final class PioneerSimulator {
         var beatInBar: Int
         var trackID: UInt32
         var isMaster: Bool
+        var isSync: Bool
     }
 
     private func liveState() -> Live {
@@ -91,24 +92,25 @@ public final class PioneerSimulator {
                 loaded: loaded,
                 playing: loaded && s.isPlaying,
                 bpm: bpm,
-                pitch: 0,
+                pitch: s.pitchPercent,
                 playhead: pos,
                 length: dur,
                 beatCount: beatCount,
                 beatInBar: loaded && beatCount >= 0 ? (beatCount % 4) + 1 : 0,
                 trackID: loaded ? Self.hashTrackID(s.title) : 0,
-                isMaster: loaded && s.isMaster
+                isMaster: loaded && s.isMaster,
+                isSync: loaded && s.isSync
             )
         }
         if standaloneMode {
             return stateQueue.sync {
                 Live(loaded: loaded, playing: playing, bpm: bpm, pitch: pitchPercent,
                      playhead: playhead, length: trackLength, beatCount: beatCount,
-                     beatInBar: beatInBar, trackID: trackID, isMaster: playing)
+                     beatInBar: beatInBar, trackID: trackID, isMaster: playing, isSync: false)
             }
         }
         return Live(loaded: false, playing: false, bpm: 0, pitch: 0, playhead: 0,
-                    length: 0, beatCount: 0, beatInBar: 0, trackID: 0, isMaster: false)
+                    length: 0, beatCount: 0, beatInBar: 0, trackID: 0, isMaster: false, isSync: false)
     }
 
     private static func hashTrackID(_ title: String) -> UInt32 {
@@ -176,9 +178,10 @@ public final class PioneerSimulator {
             var flags: UInt8 = 0
             if live.playing { flags |= 0x40 }
             if live.isMaster { flags |= 0x20 }
+            if live.isSync { flags |= 0x10 }
             b[0x89] = flags
             b[0x8b] = live.playing ? 0xfa : 0x00
-            let pitchRaw = UInt32(0x100000)
+            let pitchRaw = Self.pitchRaw(live.pitch)
             writeUInt32(pitchRaw, into: &b, at: 0x8c)
             writeUInt16(0x8000, into: &b, at: 0x90)
             writeUInt16(UInt16(max(0, live.bpm * 100)), into: &b, at: 0x92)
@@ -217,7 +220,7 @@ public final class PioneerSimulator {
             if live.loaded {
                 if live.playing, live.beatInBar != lastBar, live.beatInBar > 0 {
                     lastBar = live.beatInBar
-                    sock.send(buildBeatPacket(beatInBar: live.beatInBar, bpm: live.bpm),
+                    sock.send(buildBeatPacket(beatInBar: live.beatInBar, bpm: live.bpm, pitch: live.pitch),
                               to: "255.255.255.255", port: DJLink.beatPort)
                 }
                 sock.send(buildPositionPacket(playhead: live.playhead, length: live.length, bpm: live.bpm),
@@ -229,7 +232,7 @@ public final class PioneerSimulator {
         }
     }
 
-    private func buildBeatPacket(beatInBar: Int, bpm: Double) -> Data {
+    private func buildBeatPacket(beatInBar: Int, bpm: Double, pitch: Double = 0) -> Data {
         var b = [UInt8](repeating: 0, count: 0x60)
         for (i, v) in DJLink.magic.enumerated() { b[i] = v }
         b[0x0a] = DJLinkBeatPacket.typeBeat
@@ -238,7 +241,7 @@ public final class PioneerSimulator {
         b[0x21] = playerNumber
         b[0x23] = 0x3c
 
-        let pitchRaw = UInt32(0x100000)
+        let pitchRaw = Self.pitchRaw(pitch)
         writeUInt32(pitchRaw, into: &b, at: 0x54)
         writeUInt16(UInt16(max(0, bpm * 100)), into: &b, at: 0x5a)
         b[0x5c] = UInt8(max(1, min(4, beatInBar)))
@@ -261,6 +264,12 @@ public final class PioneerSimulator {
     }
 
     // MARK: Utilidades
+
+    /// 0x100000 = 0 %. pitchPercent +6 → ratio 1.06.
+    private static func pitchRaw(_ percent: Double) -> UInt32 {
+        let ratio = max(0.5, min(2.0, 1.0 + percent / 100.0))
+        return UInt32((ratio * Double(0x100000)).rounded())
+    }
 
     private func writeUInt16(_ v: UInt16, into b: inout [UInt8], at i: Int) {
         guard i + 1 < b.count else { return }

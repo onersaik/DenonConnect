@@ -7,9 +7,9 @@
     <key>CFBundleDisplayName</key>
     <string>STAGE CONNECT</string>
     <key>CFBundleExecutable</key>
-    <string>SC6000Connect</string>
+    <string>SC6000ConnectApp</string>
     <key>CFBundleIdentifier</key>
-    <string>com.entikrecords.sc6000connect</string>
+    <string>com.entikrecords.stageconnect</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>CFBundlePackageType</key>
@@ -29,6 +29,15 @@
     <!-- macOS pide permiso de red local para descubrir los reproductores.
          Sin esta descripción el sistema puede denegarlo en silencio. -->
     <key>NSLocalNetworkUsageDescription</key>
-    <string>STAGE CONNECT necesita la red local para descubrir tus reproductores Denon SC6000 (StageLinq) y Pioneer CDJ (Pro DJ Link).</string>
+    <string>STAGE CONNECT descubre y se conecta a tus reproductores Denon SC6000 (StageLinq, UDP 51337) y Pioneer/AlphaTheta CDJ (Pro DJ Link, UDP 50000-50002) en la red local. Sin este permiso no aparecen los equipos.</string>
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_stagelinq._tcp</string>
+    </array>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsLocalNetworking</key>
+        <true/>
+    </dict>
 </dict>
 </plist>

@@ -9,7 +9,8 @@ import Foundation
 import Combine
 
 public enum TrackNaming {
-    /// Quita el prefijo de copia temporal `stage-connect-test-<uuid>-`.
+    /// Limpia títulos de TEST, copias temporales y basura típica de filenames DJ.
+    /// No es un editor de regex: reglas fijas y conservadoras.
     public static func cleanTitle(_ raw: String) -> String {
         var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if let r = s.range(of: #"^stage-connect-test-[0-9A-Fa-f-]{36}-"#, options: .regularExpression) {
@@ -21,6 +22,26 @@ public enum TrackNaming {
                 if !rest.isEmpty { s = rest }
             }
         }
+        let lower = s.lowercased()
+        for ext in [".mp3", ".m4a", ".mp4", ".aac", ".aiff", ".aif", ".wav", ".flac", ".ogg", ".wma"] {
+            if lower.hasSuffix(ext) {
+                s = String(s.dropLast(ext.count))
+                break
+            }
+        }
+        s = s.replacingOccurrences(
+            of: #"\[(?:https?://)?(?:www\.)?[^\]\s]+\.[a-z]{2,}\]"#,
+            with: "", options: [.regularExpression, .caseInsensitive])
+        s = s.replacingOccurrences(
+            of: #"\((?:https?://)?(?:www\.)?[^)\s]+\.[a-z]{2,}\)"#,
+            with: "", options: [.regularExpression, .caseInsensitive])
+        s = s.replacingOccurrences(
+            of: #"\s*[-–—_]?\s*\d{2,3}\s*k?bps\s*$"#,
+            with: "", options: [.regularExpression, .caseInsensitive])
+        s = s.replacingOccurrences(of: #"^\d{2}[\s.\-_]+"#, with: "", options: .regularExpression)
+        s = s.replacingOccurrences(of: "_", with: " ")
+        s = s.replacingOccurrences(of: #"\s{2,}"#, with: " ", options: .regularExpression)
+        s = s.trimmingCharacters(in: .whitespacesAndNewlines)
         let banned = ["stage connect test", "stage-connect-test", "sc6000-sim", "stage connect"]
         if banned.contains(s.lowercased()) { return "" }
         return s
@@ -40,9 +61,9 @@ public enum TrackNaming {
 
 public struct TestLinkDeck: Codable, Equatable, Sendable {
     /// Columnas objetivo del waveform RGB (TEST). UDP localhost aguanta ~64 KB.
-    public static let waveformColumns = 7200
+    public static let waveformColumns = 12000
     /// Si el JSON no cabe, se baja por max-in-bin; nunca a 300 picos.
-    public static let minWaveformColumns = 1200
+    public static let minWaveformColumns = 2400
     public static let udpSafeBytes = 62000
 
     public var title: String
@@ -62,17 +83,34 @@ public struct TestLinkDeck: Codable, Equatable, Sendable {
     public var genre: String
     public var album: String
     public var comment: String
+    /// JPEG/PNG extraído del archivo en TEST (ruta local). Vacío = sin portada de archivo.
+    public var artworkPath: String
+    /// Miniatura JPEG base64 acotada. STAGE CONNECT la pinta si la ruta no se lee.
+    public static let maxArtworkJPEGChars = 4000
+    public var artworkJPEG: String
+    /// Cues en segundos (pads Q1… del simulador). Vacío = sin cues.
+    public var cues: [Double]
+    /// Loop in/out en segundos. -1 = sin loop.
+    public var loopIn: Double
+    public var loopOut: Double
+    /// Pitch ±% respecto al BPM de la pista. 0 = sin sliders.
+    public var pitch: Double
+    /// SYNC encendido en el reproductor (TEST / CDJ).
+    public var isSync: Bool
 
     enum CodingKeys: String, CodingKey {
         case title, artist, bpm, playing, position, duration, peaks, isMaster, key, genre, album, comment
-        case bands
+        case bands, artworkPath, artworkJPEG, cues, loopIn, loopOut, pitch, isSync
     }
 
     public init(title: String = "", artist: String = "", bpm: Double = 0,
                 playing: Bool = false, position: Double = 0, duration: Double = 0,
                 peaks: [UInt8] = [], isMaster: Bool = false, key: String = "",
                 genre: String = "", album: String = "", comment: String = "",
-                peaksLow: [UInt8] = [], peaksMid: [UInt8] = [], peaksHigh: [UInt8] = []) {
+                peaksLow: [UInt8] = [], peaksMid: [UInt8] = [], peaksHigh: [UInt8] = [],
+                artworkPath: String = "", artworkJPEG: String = "",
+                cues: [Double] = [], loopIn: Double = -1, loopOut: Double = -1,
+                pitch: Double = 0, isSync: Bool = false) {
         self.title = TrackNaming.cleanTitle(title)
         self.artist = artist
         self.bpm = bpm
@@ -88,6 +126,13 @@ public struct TestLinkDeck: Codable, Equatable, Sendable {
         self.genre = genre
         self.album = album
         self.comment = comment
+        self.artworkPath = artworkPath
+        self.artworkJPEG = artworkJPEG
+        self.cues = cues
+        self.loopIn = loopIn
+        self.loopOut = loopOut
+        self.pitch = pitch
+        self.isSync = isSync
         reconcileAmplitude()
     }
 
@@ -105,6 +150,13 @@ public struct TestLinkDeck: Codable, Equatable, Sendable {
         genre = try c.decodeIfPresent(String.self, forKey: .genre) ?? ""
         album = try c.decodeIfPresent(String.self, forKey: .album) ?? ""
         comment = try c.decodeIfPresent(String.self, forKey: .comment) ?? ""
+        artworkPath = try c.decodeIfPresent(String.self, forKey: .artworkPath) ?? ""
+        artworkJPEG = try c.decodeIfPresent(String.self, forKey: .artworkJPEG) ?? ""
+        cues = try c.decodeIfPresent([Double].self, forKey: .cues) ?? []
+        loopIn = try c.decodeIfPresent(Double.self, forKey: .loopIn) ?? -1
+        loopOut = try c.decodeIfPresent(Double.self, forKey: .loopOut) ?? -1
+        pitch = try c.decodeIfPresent(Double.self, forKey: .pitch) ?? 0
+        isSync = try c.decodeIfPresent(Bool.self, forKey: .isSync) ?? false
         peaksLow = []
         peaksMid = []
         peaksHigh = []
@@ -137,6 +189,19 @@ public struct TestLinkDeck: Codable, Equatable, Sendable {
         try c.encode(genre, forKey: .genre)
         try c.encode(album, forKey: .album)
         try c.encode(comment, forKey: .comment)
+        if !artworkPath.isEmpty {
+            try c.encode(artworkPath, forKey: .artworkPath)
+        }
+        if !artworkJPEG.isEmpty {
+            try c.encode(artworkJPEG, forKey: .artworkJPEG)
+        }
+        if !cues.isEmpty {
+            try c.encode(cues, forKey: .cues)
+        }
+        if loopIn >= 0 { try c.encode(loopIn, forKey: .loopIn) }
+        if loopOut >= 0 { try c.encode(loopOut, forKey: .loopOut) }
+        if abs(pitch) > 0.001 { try c.encode(pitch, forKey: .pitch) }
+        if isSync { try c.encode(isSync, forKey: .isSync) }
     }
 
     public var peaksFloat: [Float] {
@@ -151,6 +216,24 @@ public struct TestLinkDeck: Codable, Equatable, Sendable {
     public var progress: Double? {
         guard duration > 0 else { return nil }
         return min(max(position / duration, 0), 1)
+    }
+
+    public var cueFractions: [Double] {
+        guard duration > 0 else { return [] }
+        return cues.compactMap { t in
+            guard t >= 0 else { return nil }
+            return min(1, max(0, t / duration))
+        }
+    }
+
+    public var loopInFraction: Double? {
+        guard duration > 0, loopIn >= 0, loopOut >= 0, loopIn < loopOut else { return nil }
+        return min(1, max(0, loopIn / duration))
+    }
+
+    public var loopOutFraction: Double? {
+        guard duration > 0, loopIn >= 0, loopOut >= 0, loopIn < loopOut else { return nil }
+        return min(1, max(0, loopOut / duration))
     }
 
     public var loaded: Bool { duration > 0 || !title.isEmpty }
@@ -265,7 +348,7 @@ public struct TestLinkSnapshot: Codable, Equatable, Sendable {
         decks.first { $0.loaded }
     }
 
-    /// JSON listo para UDP: si no cabe, compacta bands (nunca a 300 picos).
+    /// JSON listo para UDP: si no cabe, compacta bands; la miniatura JPEG no se tira.
     public func encodedForUDP() -> Data? {
         var frame = self
         var target = 0
@@ -287,7 +370,38 @@ public struct TestLinkSnapshot: Codable, Equatable, Sendable {
                 break
             }
         }
+        if let data = try? JSONEncoder().encode(frame), data.count <= TestLinkDeck.udpSafeBytes {
+            return data
+        }
+        // El datagrama no puede perder la portada: waveform ya está en caché del receptor.
+        for i in frame.decks.indices {
+            frame.decks[i].stripWaveform()
+        }
         return try? JSONEncoder().encode(frame)
+    }
+}
+
+/// Ruta compartida TEST → STAGE CONNECT. No /tmp: el .app a menudo no lo lee.
+public enum StageConnectArtworkStore {
+    public static func writableDirectory() -> URL {
+        let fm = FileManager.default
+        var dirs: [URL] = []
+        if let app = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            dirs.append(app.appendingPathComponent("STAGE CONNECT/art", isDirectory: true))
+        }
+        dirs.append(URL(fileURLWithPath: "/Users/Shared/STAGE CONNECT/art", isDirectory: true))
+        for dir in dirs {
+            try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            let probe = dir.appendingPathComponent(".w")
+            if fm.createFile(atPath: probe.path, contents: Data([1])) {
+                try? fm.removeItem(at: probe)
+                return dir
+            }
+        }
+        let fallback = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("stage-connect-art", isDirectory: true)
+        try? fm.createDirectory(at: fallback, withIntermediateDirectories: true)
+        return fallback
     }
 }
 
@@ -378,6 +492,8 @@ public final class TestLinkReceiver: ObservableObject {
     private var lastHigh: [[UInt8]] = [[], []]
     private var lastBPM: [Double] = [0, 0]
     private var lastBPMTitle: [String] = ["", ""]
+    private var lastArtPath: [String] = ["", ""]
+    private var lastArtJPEG: [String] = ["", ""]
     public private(set) var lastPacketAt = Date.distantPast
     private var lastRosterKey = ""
 
@@ -413,6 +529,8 @@ public final class TestLinkReceiver: ObservableObject {
                     lastLow.append(contentsOf: Array(repeating: [UInt8](), count: extra))
                     lastMid.append(contentsOf: Array(repeating: [UInt8](), count: extra))
                     lastHigh.append(contentsOf: Array(repeating: [UInt8](), count: extra))
+                    lastArtPath.append(contentsOf: Array(repeating: "", count: extra))
+                    lastArtJPEG.append(contentsOf: Array(repeating: "", count: extra))
                 }
                 if frame.decks.count > lastBPM.count {
                     lastBPM.append(contentsOf: Array(repeating: 0.0, count: frame.decks.count - lastBPM.count))
@@ -436,6 +554,22 @@ public final class TestLinkReceiver: ObservableObject {
                         lastLow[i] = []
                         lastMid[i] = []
                         lastHigh[i] = []
+                        if i < lastArtPath.count {
+                            lastArtPath[i] = ""
+                            lastArtJPEG[i] = ""
+                        }
+                    }
+                    if frame.decks[i].loaded, i < lastArtPath.count {
+                        if frame.decks[i].artworkPath.isEmpty, !lastArtPath[i].isEmpty {
+                            frame.decks[i].artworkPath = lastArtPath[i]
+                        } else if !frame.decks[i].artworkPath.isEmpty {
+                            lastArtPath[i] = frame.decks[i].artworkPath
+                        }
+                        if frame.decks[i].artworkJPEG.isEmpty, !lastArtJPEG[i].isEmpty {
+                            frame.decks[i].artworkJPEG = lastArtJPEG[i]
+                        } else if !frame.decks[i].artworkJPEG.isEmpty {
+                            lastArtJPEG[i] = frame.decks[i].artworkJPEG
+                        }
                     }
                     frame.decks[i].title = TrackNaming.cleanTitle(frame.decks[i].title)
                     let title = frame.decks[i].title

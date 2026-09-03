@@ -59,13 +59,24 @@ make_app() {
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSLocalNetworkUsageDescription</key>
-  <string>Necesario para conectar con reproductores DJ en la red local.</string>
+  <string>STAGE CONNECT descubre y se conecta a tus reproductores Denon SC6000 (StageLinq, UDP 51337) y Pioneer/AlphaTheta CDJ (Pro DJ Link, UDP 50000-50002) en la red local. Sin este permiso no aparecen los equipos.</string>
   <key>NSBonjourServices</key><array><string>_stagelinq._tcp</string></array>
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSAllowsLocalNetworking</key>
+    <true/>
+  </dict>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.music</string>
 </dict></plist>
 PLIST
-  codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true
+  local ENT="$REPO/packaging/STAGECONNECT.entitlements"
+  if [ -f "$ENT" ]; then
+    codesign --force --deep --sign - --entitlements "$ENT" "$APP" >/dev/null 2>&1 \
+      || codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true
+  else
+    codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true
+  fi
   echo "  $APP"
 }
 

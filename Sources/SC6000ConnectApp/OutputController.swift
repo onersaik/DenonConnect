@@ -11,6 +11,9 @@
 import Foundation
 import Combine
 import CoreAudio
+#if os(macOS)
+import AppKit
+#endif
 import StageLinqKit
 
 // MARK: - Entrada de historial
@@ -52,7 +55,8 @@ final class OutputController: ObservableObject {
     @Published var ltcTimecode        = "00:00:00:00"
     @Published var ltcError: String   = ""
     @Published var ltcDevices: [AudioDeviceInfo] = []
-    @Published var ltcSelectedDeviceID: AudioDeviceID = 0
+    /// Varias salidas: el mismo bitstream Master se duplica en cada device.
+    @Published var ltcSelectedDeviceIDs: [AudioDeviceID] = [0]
     /// Si true, el Master salta al deck master / On Air / el que está sonando.
     /// Si false, se queda anclado al último deck seguido (no re-arma al apagar).
     @Published var ltcAutoFollow: Bool = true
@@ -66,21 +70,26 @@ final class OutputController: ObservableObject {
     // MARK: SMPTE LTC — por reproductor
     @Published var ltcDeckSlots: [LTCDeckSlot] = []
     @Published var ltcDeckEnabled: [String: Bool] = [:]
-    @Published var ltcDeckDeviceID: [String: AudioDeviceID] = [:]
+    @Published var ltcDeckDeviceIDs: [String: [AudioDeviceID]] = [:]
     @Published var ltcDeckTimecode: [String: String] = [:]
     @Published var ltcDeckError: [String: String] = [:]
     @Published var ltcDeckFrameRates: [String: LTCGenerator.FrameRate] = [:]
     @Published var ltcDeviceWarning: String = ""
+    /// LOCK por fila: el Master auto-follow / fader / On Air no pisan este deck.
+    /// Con LTC propio en otra salida, su generador sigue el playhead de esta fila.
+    @Published var ltcDeckLocked: [String: Bool] = [:]
 
     // MARK: MIDI Timecode (MTC)
     @Published var mtcEnabled         = false
     @Published var mtcFrameRate: MIDITimecodeGenerator.FrameRate = .fps25
     @Published var mtcError: String   = ""
 
-    // MARK: Servidor Web
+    // MARK: Servidor Web / OBS
     @Published var webEnabled         = false
     @Published var webPort: String    = "8080"
     @Published var webError: String   = ""
+    @Published var obsTransparent     = true
+    @Published var copiedHint         = ""
 
     // MARK: Reloj
     @Published var clockSource        = "—"
@@ -88,12 +97,31 @@ final class OutputController: ObservableObject {
 
     // MARK: Historial
     @Published var playlistHistory: [PlaylistEntry] = []
-    private var lastTrackedID: String = ""
+    @Published var historyAutoSave: Bool = UserDefaults.standard.object(forKey: "sc.historyAutoSave") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(historyAutoSave, forKey: "sc.historyAutoSave") }
+    }
+    @Published var historyFolderPath: String = UserDefaults.standard.string(forKey: "sc.historyFolderPath") ?? "" {
+        didSet { UserDefaults.standard.set(historyFolderPath, forKey: "sc.historyFolderPath") }
+    }
+    private var lastTrackedByDeck: [String: String] = [:]
+
+    var historyFolderURL: URL {
+        if !historyFolderPath.isEmpty {
+            return URL(fileURLWithPath: historyFolderPath, isDirectory: true)
+        }
+        return Self.defaultHistoryFolder()
+    }
+
+    static func defaultHistoryFolder() -> URL {
+        let music = FileManager.default.urls(for: .musicDirectory, in: .userDomainMask).first
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Music")
+        return music.appendingPathComponent("STAGE CONNECT/historial", isDirectory: true)
+    }
 
     // MARK: Privado
     private var bridge:  ResolumeBridge?
-    private var ltc:     LTCGenerator?
-    private var deckLTC: [String: LTCGenerator] = [:]
+    private var ltc:     LTCFanout?
+    private var deckLTC: [String: LTCFanout] = [:]
     private var mtc:     MIDITimecodeGenerator?
     private var web:     WebServer?
     private var timer:   Timer?
@@ -101,18 +129,24 @@ final class OutputController: ObservableObject {
     private weak var stageLinq:  StageLinqManager?
     private weak var proDJLink:  ProDJLinkManager?
     private weak var testLink:   TestLinkReceiver?
+    private weak var software:   SoftwareDJManager?
+    private weak var tracklist:  TracklistStore?
     private var logSink: ((String) -> Void)?
 
     var ltcAnyEnabled: Bool { ltcEnabled || deckLTC.contains { $0.value.isRunning } }
 
     // MARK: Inicio
 
-    func attach(stageLinq: StageLinqManager, proDJLink: ProDJLinkManager, testLink: TestLinkReceiver? = nil) {
+    func attach(stageLinq: StageLinqManager, proDJLink: ProDJLinkManager, testLink: TestLinkReceiver? = nil,
+                software: SoftwareDJManager? = nil, tracklist: TracklistStore? = nil) {
         self.stageLinq = stageLinq
         self.proDJLink = proDJLink
         self.testLink  = testLink
+        self.software  = software
+        self.tracklist = tracklist
         self.logSink   = { [weak stageLinq] msg in stageLinq?.log(msg) }
         ltcDevices     = LTCGenerator.availableOutputDevices()
+        loadHistoryFromDisk()
 
         timer?.invalidate()
         let t = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in self?.tick() }
@@ -165,6 +199,65 @@ final class OutputController: ObservableObject {
         return Self.sameDeckID(hot, id)
     }
 
+    func isDeckLocked(_ id: String) -> Bool {
+        for (key, on) in ltcDeckLocked where on {
+            if Self.sameDeckID(key, id) { return true }
+        }
+        return false
+    }
+
+    func toggleDeckLock(_ id: String) {
+        setDeckLocked(id, locked: !isDeckLocked(id))
+    }
+
+    func setDeckLocked(_ id: String, locked: Bool) {
+        ltcDeckLocked[canonicalDeckKey(id)] = locked
+    }
+
+    /// El deck emite LTC en un dispositivo distinto al Master de casa.
+    func hasSeparateLTCOutput(_ id: String) -> Bool {
+        guard isDeckLTCEnabled(id) else { return false }
+        if !ltcEnabled { return true }
+        let deckSet = Set(deckDeviceIDs(id).map { resolvedDeviceID($0) })
+        let masterSet = Set(masterDeviceIDs.map { resolvedDeviceID($0) })
+        return !deckSet.isSubset(of: masterSet) || deckSet.count != masterSet.count
+    }
+
+    var masterDeviceIDs: [AudioDeviceID] {
+        LTCFanout.uniqueIDs(ltcSelectedDeviceIDs)
+    }
+
+    func deckDeviceIDs(_ id: String) -> [AudioDeviceID] {
+        LTCFanout.uniqueIDs(ltcDeckDeviceIDs[generatorKey(for: id)] ?? [0])
+    }
+
+    func isMasterDeviceSelected(_ deviceID: AudioDeviceID) -> Bool {
+        masterDeviceIDs.contains(deviceID)
+    }
+
+    func isDeckDeviceSelected(_ id: String, deviceID: AudioDeviceID) -> Bool {
+        deckDeviceIDs(id).contains(deviceID)
+    }
+
+    /// Quién más (otra fuente LTC) usa ya este device. Vacío = libre o es la misma fuente.
+    func conflictOwners(for deviceID: AudioDeviceID, excluding slot: String) -> [String] {
+        let want = resolvedDeviceID(deviceID)
+        var owners: [String] = []
+        if slot != "master" {
+            for id in masterDeviceIDs where resolvedDeviceID(id) == want && ltcEnabled {
+                owners.append("MASTER")
+            }
+        }
+        for (key, fan) in deckLTC where fan.isRunning {
+            if Self.sameDeckID(key, slot) { continue }
+            for id in deckDeviceIDs(key) where resolvedDeviceID(id) == want {
+                let label = ltcDeckSlots.first { Self.sameDeckID($0.id, key) }?.label ?? key
+                owners.append(label)
+            }
+        }
+        return owners
+    }
+
     // MARK: Clic en el botón SMPTE de una fila
 
     /// Dos capas, sin pelearse con el auto-follow:
@@ -212,7 +305,7 @@ final class OutputController: ObservableObject {
         }
         ltcSourceDeckID = id
         ltcAutoFollow = false
-        if ltcEnabled {
+        if ltcEnabled, !isDeckLocked(id) {
             applyToMaster(snapshotForDeckID(id))
         }
     }
@@ -266,23 +359,20 @@ final class OutputController: ObservableObject {
     func startMasterLTC() {
         stopMasterLTC(silent: true)
         ltcError = ""
-        let deviceID = ltcSelectedDeviceID
-        if let owner = deviceOwner(deviceID, excluding: "master") {
-            ltcError = "El dispositivo ya lo usa \(owner). Dos LTC en el mismo canal se pisan."
-            ltcDeviceWarning = ltcError
-            return
-        }
+        let ids = masterDeviceIDs
+        refreshDeviceWarning()
         let snap = snapshotForMaster()
         do {
-            let gen = makeGenerator(name: "Master", deviceID: deviceID, snap: snap)
-            try gen.start()
-            applyPlayhead(gen, snap)
-            ltc = gen
+            let fan = LTCFanout(name: "Master", log: { [weak self] in self?.logSink?($0) })
+            fan.frameRate = ltcFrameRate
+            try fan.start(deviceIDs: ids, playhead: snap.playhead, playing: false)
+            applyPlayhead(fan, snap)
+            ltc = fan
             ltcEnabled = true
             ltcFollowedDeckID = snap.sourceDeckID
             ltcTimecode = Self.timecode(snap, fps: ltcFrameRate)
             refreshDeviceWarning()
-            logSink?("[SMPTE] Master ON — \(snap.sourceLabel)")
+            logSink?("[SMPTE] Master ON — \(ids.count) salida\(ids.count == 1 ? "" : "s") — \(snap.sourceLabel)")
         } catch {
             ltcError = "\(error)"
             logSink?("[SMPTE LTC] Master error: \(error)")
@@ -321,28 +411,21 @@ final class OutputController: ObservableObject {
         let key = generatorKey(for: id)
         stopDeckLTC(key, silent: true)
         ltcDeckError[key] = nil
-        let deviceID = ltcDeckDeviceID[key] ?? 0
-        if let owner = deviceOwner(deviceID, excluding: key) {
-            let msg = "El dispositivo ya lo usa \(owner). Elige otra salida."
-            ltcDeckError[key] = msg
-            ltcDeckEnabled[key] = false
-            ltcDeviceWarning = msg
-            logSink?("[SMPTE] \(key): \(msg)")
-            return
-        }
+        let ids = deckDeviceIDs(key)
+        refreshDeviceWarning()
         let snap = snapshotForDeckID(key) ?? snapshotForDeckID(id)
         do {
             let label = ltcDeckSlots.first { Self.sameDeckID($0.id, key) }?.label ?? key
             let deckRate = ltcDeckFrameRates[key] ?? ltcFrameRate
-            let gen = makeGenerator(name: label, deviceID: deviceID, snap: snap)
-            gen.frameRate = deckRate
-            try gen.start()
-            applyPlayhead(gen, snap)
-            deckLTC[key] = gen
+            let fan = LTCFanout(name: label, log: { [weak self] in self?.logSink?($0) })
+            fan.frameRate = deckRate
+            try fan.start(deviceIDs: ids, playhead: snap?.playhead, playing: false)
+            applyPlayhead(fan, snap)
+            deckLTC[key] = fan
             ltcDeckEnabled[key] = true
             ltcDeckTimecode[key] = Self.timecode(snap, fps: deckRate)
             refreshDeviceWarning()
-            logSink?("[SMPTE] Deck ON \(label)")
+            logSink?("[SMPTE] Deck ON \(label) — \(ids.count) salida\(ids.count == 1 ? "" : "s")")
         } catch {
             ltcDeckError[key] = "\(error)"
             ltcDeckEnabled[key] = false
@@ -373,8 +456,30 @@ final class OutputController: ObservableObject {
     }
 
     func setDeckDevice(_ id: String, deviceID: AudioDeviceID) {
+        toggleDeckDevice(id, deviceID: deviceID, on: true)
+    }
+
+    func toggleMasterDevice(_ deviceID: AudioDeviceID) {
+        var ids = ltcSelectedDeviceIDs
+        if ids.contains(deviceID) {
+            ids.removeAll { $0 == deviceID }
+        } else {
+            ids.append(deviceID)
+        }
+        ltcSelectedDeviceIDs = LTCFanout.uniqueIDs(ids)
+        if ltcEnabled { startMasterLTC() } else { refreshDeviceWarning() }
+    }
+
+    func toggleDeckDevice(_ id: String, deviceID: AudioDeviceID, on: Bool? = nil) {
         let key = generatorKey(for: id)
-        ltcDeckDeviceID[key] = deviceID
+        var ids = ltcDeckDeviceIDs[key] ?? [0]
+        let shouldOn = on ?? !ids.contains(deviceID)
+        if shouldOn {
+            if !ids.contains(deviceID) { ids.append(deviceID) }
+        } else {
+            ids.removeAll { $0 == deviceID }
+        }
+        ltcDeckDeviceIDs[key] = LTCFanout.uniqueIDs(ids)
         if isDeckLTCEnabled(key) {
             startDeckLTC(key)
         } else {
@@ -391,7 +496,7 @@ final class OutputController: ObservableObject {
     }
 
     func deckDeviceBinding(_ id: String) -> AudioDeviceID {
-        ltcDeckDeviceID[generatorKey(for: id)] ?? 0
+        deckDeviceIDs(id).first ?? 0
     }
 
     private func generatorKey(for id: String) -> String {
@@ -449,19 +554,106 @@ final class OutputController: ObservableObject {
             let srv = WebServer(log: { [weak self] in self?.logSink?($0) })
             srv.port = port
             srv.stateProvider = { [weak self] in self?.currentDeckSnapshots() ?? [] }
+            srv.failureHandler = { [weak self] msg in
+                DispatchQueue.main.async {
+                    self?.web?.stop()
+                    self?.web = nil
+                    self?.webEnabled = false
+                    self?.webError = msg
+                }
+            }
             do {
                 try srv.start()
                 web = srv; webEnabled = true; webError = ""
             } catch {
-                webError = "\(error)"
-                logSink?("[Web] Error al iniciar: \(error)")
+                webError = Self.webErrorText(error, port: port)
+                logSink?("[Web] Error al iniciar: \(webError)")
             }
         }
     }
 
+    var webPortNumber: UInt16 { UInt16(webPort) ?? 8080 }
+
+    var webLocalURL: String { "http://127.0.0.1:\(webPortNumber)" }
+
+    var webLANURL: String {
+        "http://\(NetworkInfo.describe(NetworkInfo.localIPv4Bytes())):\(webPortNumber)"
+    }
+
+    func obsURL(lan: Bool, transparent: Bool? = nil) -> String {
+        let base = lan ? webLANURL : webLocalURL
+        let t = transparent ?? obsTransparent
+        return t ? "\(base)/obs?t=1" : "\(base)/obs"
+    }
+
+    func copyToPasteboard(_ text: String, hint: String) {
+        #if os(macOS)
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(text, forType: .string)
+        copiedHint = hint
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) { [weak self] in
+            if self?.copiedHint == hint { self?.copiedHint = "" }
+        }
+        #endif
+    }
+
+    func copyTimecode() {
+        copyToPasteboard(ltcTimecode, hint: "TC copiado")
+    }
+
+    private static func webErrorText(_ error: Error, port: UInt16) -> String {
+        let raw = (error as NSError)
+        if raw.domain == NSPOSIXErrorDomain, raw.code == EADDRINUSE {
+            return "Puerto \(port) ocupado. Cambia el puerto o cierra la otra app que lo usa."
+        }
+        let desc = error.localizedDescription.lowercased()
+        if desc.contains("address already") || desc.contains("in use") || desc.contains("48") {
+            return "Puerto \(port) ocupado. Cambia el puerto o cierra la otra app que lo usa."
+        }
+        return "No se pudo abrir el puerto \(port): \(error.localizedDescription)"
+    }
+
     // MARK: Historial
 
-    func clearHistory() { playlistHistory.removeAll() }
+    func clearHistory() {
+        playlistHistory.removeAll()
+        lastTrackedByDeck.removeAll()
+        persistHistory()
+    }
+
+    func persistHistory() {
+        guard historyAutoSave else { return }
+        let folder = historyFolderURL
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        } catch {
+            logSink?("[Historial] No se pudo crear \(folder.path): \(error.localizedDescription)")
+            return
+        }
+        let enc = JSONEncoder()
+        enc.outputFormatting = [.prettyPrinted, .sortedKeys]
+        enc.dateEncodingStrategy = .iso8601
+        let jsonURL = folder.appendingPathComponent("historial.json")
+        if let data = try? enc.encode(playlistHistory) {
+            try? data.write(to: jsonURL, options: .atomic)
+        }
+        let lines = playlistHistory.reversed().map { entry in
+            "\(entry.formattedTime)\t\(entry.artist)\t\(entry.title)\t\(entry.source)"
+        }
+        let txt = lines.isEmpty ? "" : lines.joined(separator: "\n") + "\n"
+        try? txt.write(to: folder.appendingPathComponent("historial.txt"), atomically: true, encoding: .utf8)
+    }
+
+    func loadHistoryFromDisk() {
+        let url = historyFolderURL.appendingPathComponent("historial.json")
+        guard let data = try? Data(contentsOf: url) else { return }
+        let dec = JSONDecoder()
+        dec.dateDecodingStrategy = .iso8601
+        if let entries = try? dec.decode([PlaylistEntry].self, from: data) {
+            playlistHistory = entries
+        }
+    }
 
     func exportHistoryCSV() -> String {
         var lines = ["Hora,Artista,Titulo,Fuente"]
@@ -520,36 +712,41 @@ final class OutputController: ObservableObject {
             applyPlayhead(mtc: mtc, snap)
         }
 
-        trackHistoryIfNeeded(snapshot: masterSnapshot)
+        trackHistoryIfNeeded()
+        ingestTracklist()
+    }
+
+    func liveDeckSnapshots() -> [DeckSnapshot] { currentDeckSnapshots() }
+
+    private func ingestTracklist() {
+        let playing = currentDeckSnapshots().compactMap { d -> (String, String, String, Bool)? in
+            guard d.isPlaying, !d.title.isEmpty else { return nil }
+            return (d.title, d.artist, d.label, d.isMaster || d.ltcSource)
+        }
+        let store = tracklist
+        DispatchQueue.main.async {
+            guard let store, !store.items.isEmpty else { return }
+            store.ingest(playing: playing)
+        }
     }
 
     // MARK: Generadores
-
-    private func makeGenerator(name: String, deviceID: AudioDeviceID, snap: SyncSnapshot?) -> LTCGenerator {
-        let gen = LTCGenerator(name: name, log: { [weak self] in self?.logSink?($0) })
-        gen.frameRate = ltcFrameRate
-        gen.outputDeviceID = deviceID == 0 ? nil : deviceID
-        if let playhead = snap?.playhead, playhead.isFinite, playhead >= 0 {
-            gen.applyPlayhead(seconds: playhead, playing: false)
-        }
-        return gen
-    }
 
     private func applyToMaster(_ snap: SyncSnapshot?) {
         applyPlayhead(ltc, snap)
     }
 
-    private func applyPlayhead(_ gen: LTCGenerator?, _ snap: SyncSnapshot?) {
-        guard let gen else { return }
+    private func applyPlayhead(_ fan: LTCFanout?, _ snap: SyncSnapshot?) {
+        guard let fan else { return }
         guard let snap else {
-            gen.setPaused(true)
+            fan.setPaused(true)
             return
         }
         guard let playhead = snap.playhead, playhead.isFinite, playhead >= 0 else {
-            gen.setPaused(true)
+            fan.setPaused(true)
             return
         }
-        gen.applyPlayhead(seconds: playhead, playing: snap.isPlaying)
+        fan.applyPlayhead(seconds: playhead, playing: snap.isPlaying)
     }
 
     private func applyPlayhead(mtc gen: MIDITimecodeGenerator, _ snap: SyncSnapshot?) {
@@ -575,21 +772,7 @@ final class OutputController: ObservableObject {
 
     /// Quién ocupa ya este dispositivo (Master o un deck). nil = libre.
     func deviceOwner(_ deviceID: AudioDeviceID, excluding slot: String) -> String? {
-        let want = resolvedDeviceID(deviceID)
-        if ltcEnabled, slot != "master" {
-            if resolvedDeviceID(ltcSelectedDeviceID) == want {
-                return "LTC Master"
-            }
-        }
-        for (key, gen) in deckLTC where gen.isRunning {
-            if Self.sameDeckID(key, slot) { continue }
-            let other = resolvedDeviceID(ltcDeckDeviceID[key] ?? 0)
-            if other == want {
-                let label = ltcDeckSlots.first { Self.sameDeckID($0.id, key) }?.label ?? key
-                return label
-            }
-        }
-        return nil
+        conflictOwners(for: deviceID, excluding: slot).first
     }
 
     private func resolvedDeviceID(_ id: AudioDeviceID) -> AudioDeviceID {
@@ -602,20 +785,27 @@ final class OutputController: ObservableObject {
 
     private func refreshDeviceWarning() {
         var seen: [AudioDeviceID: String] = [:]
+        var clashes: [String] = []
         func note(_ deviceID: AudioDeviceID, label: String) {
             let rid = resolvedDeviceID(deviceID)
-            if let prev = seen[rid] {
-                ltcDeviceWarning = "\(prev) y \(label) comparten el mismo dispositivo: los timecodes se pisan. Asigna salidas distintas (BlackHole, Loopback o una interfaz)."
-                return
+            if let prev = seen[rid], prev != label {
+                clashes.append("\(prev) y \(label)")
+            } else {
+                seen[rid] = label
             }
-            seen[rid] = label
         }
-        ltcDeviceWarning = ""
-        if ltcEnabled { note(ltcSelectedDeviceID, label: "Master") }
-        for (key, gen) in deckLTC where gen.isRunning {
+        if ltcEnabled {
+            for id in masterDeviceIDs { note(id, label: "MASTER") }
+        }
+        for (key, fan) in deckLTC where fan.isRunning {
             let label = ltcDeckSlots.first { Self.sameDeckID($0.id, key) }?.label ?? key
-            note(ltcDeckDeviceID[key] ?? 0, label: label)
-            if !ltcDeviceWarning.isEmpty { return }
+            for id in deckDeviceIDs(key) { note(id, label: label) }
+        }
+        if clashes.isEmpty {
+            ltcDeviceWarning = ""
+        } else {
+            let uniq = Array(Set(clashes)).sorted()
+            ltcDeviceWarning = "\(uniq.joined(separator: "; ")): mismo canal, los timecodes se pisan. El mismo LTC en dos devices distintos es correcto."
         }
     }
 
@@ -646,33 +836,38 @@ final class OutputController: ObservableObject {
         }
 
         if let sl = stageLinq {
-            let denonOn = testLink?.roster.denonOn == true
             for device in sl.devices {
                 for deck in device.decks {
-                    let overlay = denonOn ? testLink?.snapshot?.deck(deck.id - 1) : nil
-                    let title = TrackNaming.cleanTitle(overlay?.title ?? deck.trackTitle)
-                    let loaded = overlay?.loaded ?? (deck.songLoaded && !title.isEmpty)
+                    let overlay = denonOverlay(for: device, deck: deck)
+                    let loaded = overlay?.loaded ?? deck.songLoaded
                     guard loaded else { continue }
-                    let layer = deck.id == 1 ? "A" : (deck.id == 2 ? "B" : "\(deck.id)")
-                    let name = device.name.isEmpty ? device.ip : device.name
-                    let id = overlay != nil
+                    let layer = DeckDisplayBuilder.denonLayerCaption(deck.id)
+                    let id = device.isDenonSimulator
                         ? DeckDisplayBuilder.testDenonID(deck.id - 1)
                         : "denon-\(device.id)-\(deck.id)"
-                    add(id, "SC6000 \(name) \(layer)")
+                    add(id, device.isDenonSimulator
+                        ? DeckDisplayBuilder.productDenonLabel(layer: deck.id)
+                        : "SC6000 · \(DeckDisplayBuilder.displayDeviceName(device.name.isEmpty ? "SC6000" : device.name)) \(layer)")
                 }
             }
         }
         if testLink?.roster.denonOn == true {
-            if testLink?.roster.layerLoaded(0) == true { add(DeckDisplayBuilder.testDenonID(0), "SC6000 TEST A") }
-            if testLink?.roster.layerLoaded(1) == true { add(DeckDisplayBuilder.testDenonID(1), "SC6000 TEST B") }
+            if let layers = testLink?.roster.loadedLayers {
+                for idx in layers.indices where testLink?.roster.layerLoaded(idx) == true {
+                    add(
+                        DeckDisplayBuilder.testDenonID(idx),
+                        DeckDisplayBuilder.productDenonLabel(layer: idx + 1)
+                    )
+                }
+            }
         }
         if testLink?.roster.hasPioneerTrack == true {
-            add(DeckDisplayBuilder.testPioneerID, "CDJ-3000 TEST")
+            add(DeckDisplayBuilder.testPioneerID, DeckDisplayBuilder.productPioneerLabel())
         }
         if let pdl = proDJLink {
             for device in pdl.devices {
                 if !shouldUsePioneer(device) { continue }
-                add("pioneer-\(device.id)", "\(device.model.isEmpty ? "CDJ" : device.model) P\(device.playerNumber)")
+                    add("pioneer-\(device.id)", DeckDisplayBuilder.productPioneerLabel(player: Int(device.playerNumber), model: device.model))
             }
         }
         return slots
@@ -687,20 +882,21 @@ final class OutputController: ObservableObject {
 
     // MARK: Seguimiento de historial
 
-    private func trackHistoryIfNeeded(snapshot: SyncSnapshot) {
-        guard snapshot.isPlaying, !snapshot.sourceLabel.isEmpty else { return }
-        let trackKey = snapshot.sourceLabel + "|" + (snapshot.trackTitle ?? "")
-        guard trackKey != lastTrackedID, !(snapshot.trackTitle ?? "").isEmpty else { return }
-        lastTrackedID = trackKey
-        let entry = PlaylistEntry(
-            id: UUID(),
-            timestamp: Date(),
-            title: snapshot.trackTitle ?? "",
-            artist: snapshot.trackArtist ?? "",
-            source: snapshot.sourceLabel
-        )
-        DispatchQueue.main.async { [weak self] in
-            self?.playlistHistory.insert(entry, at: 0)
+    private func trackHistoryIfNeeded() {
+        for snap in currentDeckSnapshots() {
+            guard snap.isPlaying, !snap.title.isEmpty else { continue }
+            let trackKey = snap.title + "|" + snap.artist
+            if lastTrackedByDeck[snap.label] == trackKey { continue }
+            lastTrackedByDeck[snap.label] = trackKey
+            let entry = PlaylistEntry(
+                id: UUID(),
+                timestamp: Date(),
+                title: snap.title,
+                artist: snap.artist,
+                source: snap.label
+            )
+            playlistHistory.insert(entry, at: 0)
+            persistHistory()
         }
     }
 
@@ -709,21 +905,29 @@ final class OutputController: ObservableObject {
     private func currentDeckSnapshots() -> [DeckSnapshot] {
         var result: [DeckSnapshot] = []
         if let sl = stageLinq {
-            let denonOn = testLink?.roster.denonOn == true
             for device in sl.devices {
-                for deck in device.decks where deck.songLoaded && !deck.trackTitle.isEmpty {
-                    let overlay = denonOn ? testLink?.snapshot?.deck(deck.id - 1) : nil
+                for deck in device.decks {
+                    let overlay = denonOverlay(for: device, deck: deck)
+                    guard overlay?.loaded ?? deck.songLoaded else { continue }
                     let bpm = MusicalClock.bpm(overlay?.bpm ?? 0, deck.bpm, deck.beatBpm)
-                    let layer = deck.id == 1 ? "A" : (deck.id == 2 ? "B" : "\(deck.id)")
-                    let name  = device.name.isEmpty ? device.ip : device.name
+                    let layer = DeckDisplayBuilder.denonLayerCaption(deck.id)
+                    let denonLabel = device.isDenonSimulator
+                        ? DeckDisplayBuilder.productDenonLabel(layer: deck.id)
+                        : "SC6000 · \(DeckDisplayBuilder.displayDeviceName(device.name.isEmpty ? "SC6000" : device.name)) \(layer)"
                     let prog  = overlay?.progress ?? deck.beatProgress
                     let elapsed: Double? = overlay?.position ?? prog.map { $0 * deck.trackLength }
-                    let deckID = overlay != nil
+                    let deckID = device.isDenonSimulator
                         ? DeckDisplayBuilder.testDenonID(deck.id - 1)
                         : "denon-\(device.id)-\(deck.id)"
                     let isLTCSrc = hotDeckID == deckID
+                    let dTag = Self.storedTag(
+                        device.isDenonSimulator
+                            ? DeckLabelKey.denonTest(deck.id - 1)
+                            : DeckLabelKey.denon(token: device.token, layer: deck.id),
+                        fallback: layer
+                    )
                     result.append(DeckSnapshot(
-                        label:     "SC6000 \(name) \(layer)",
+                        label:     denonLabel,
                         title:     TrackNaming.cleanTitle(overlay?.title ?? deck.trackTitle),
                         artist:    overlay?.artist ?? deck.trackArtist,
                         bpm:       bpm,
@@ -737,17 +941,18 @@ final class OutputController: ObservableObject {
                             : Int(deck.currentBeat.truncatingRemainder(dividingBy: 4)) + 1,
                         key:       deck.trackKey,
                         ltcSource: isLTCSrc,
-                        tcTimecode: ltcDeckTimecode[deckID] ?? (isLTCSrc && ltcEnabled ? ltcTimecode : nil)
+                        tcTimecode: ltcDeckTimecode[deckID] ?? (isLTCSrc && ltcEnabled ? ltcTimecode : nil),
+                        tag:       dTag
                     ))
                 }
             }
         }
         if let overlay = pioneerTestOverlay() {
-            let snap = makeTestLinkSyncSnapshot(overlay, label: "CDJ-3000 TEST",
+            let snap = makeTestLinkSyncSnapshot(overlay, label: DeckDisplayBuilder.productPioneerLabel(),
                                                 id: DeckDisplayBuilder.testPioneerID,
                                                 isMaster: overlay.playing)
             result.append(DeckSnapshot(
-                label:     "CDJ-3000 TEST",
+                label:     DeckDisplayBuilder.productPioneerLabel(),
                 title:     snap.trackTitle ?? "",
                 artist:    snap.trackArtist ?? "",
                 bpm:       snap.bpm,
@@ -759,11 +964,12 @@ final class OutputController: ObservableObject {
                 beatInBar: snap.beatInBar
             ))
         }
-        if let overlay = denonTestOverlay(layer: 0), stageLinqHasNoLayer(0) {
-            result.append(testDeckSnapshot(overlay, label: "SC6000 TEST A", master: overlay.isMaster || overlay.playing))
-        }
-        if let overlay = denonTestOverlay(layer: 1), stageLinqHasNoLayer(1) {
-            result.append(testDeckSnapshot(overlay, label: "SC6000 TEST B", master: overlay.isMaster))
+        if let layers = testLink?.roster.loadedLayers {
+            for idx in layers.indices {
+                guard let overlay = denonTestOverlay(layer: idx), stageLinqHasNoLayer(idx) else { continue }
+                let master = idx == 0 ? (overlay.isMaster || overlay.playing) : overlay.isMaster
+                result.append(testDeckSnapshot(overlay, label: DeckDisplayBuilder.productDenonLabel(layer: idx + 1), master: master))
+            }
         }
         if let pdl = proDJLink {
             for device in pdl.devices {
@@ -771,26 +977,56 @@ final class OutputController: ObservableObject {
                 let bpm = MusicalClock.bpm(device.effectiveBPM, device.trackBPM)
                 let pID = "pioneer-\(device.id)"
                 let pIsLTCSrc = hotDeckID == pID
+                let pTag = Self.storedTag(
+                    DeckLabelKey.pioneer(ip: device.ip, player: device.playerNumber),
+                    fallback: "\(device.playerNumber)"
+                )
                 result.append(DeckSnapshot(
-                    label:     "\(device.model.isEmpty ? "CDJ" : device.model) P\(device.playerNumber)",
+                    label:     DeckDisplayBuilder.productPioneerLabel(player: Int(device.playerNumber), model: device.model),
                     title:     device.trackTitle,
                     artist:    device.trackArtist,
                     bpm:       bpm,
                     isPlaying: device.isPlaying,
                     isMaster:  device.isMaster,
-                    elapsed:   device.hasPosition ? device.playhead : nil,
-                    duration:  device.hasPosition && device.trackLength > 0 ? device.trackLength : nil,
-                    progress:  device.hasPosition && device.trackLength > 0 ? device.progress : nil,
+                    elapsed:   device.resolvedPlayhead,
+                    duration:  device.trackLength > 0 ? device.trackLength : nil,
+                    progress:  device.trackLength > 0 && device.resolvedPlayhead != nil ? device.progress : nil,
                     beatInBar: device.beatInBar,
                     key:       device.trackKey,
                     pitchPct:  device.pitchPercent,
                     isOnAir:   device.isOnAir,
                     ltcSource: pIsLTCSrc,
-                    tcTimecode: ltcDeckTimecode[pID] ?? (pIsLTCSrc && ltcEnabled ? ltcTimecode : nil)
+                    tcTimecode: ltcDeckTimecode[pID] ?? (pIsLTCSrc && ltcEnabled ? ltcTimecode : nil),
+                    tag:       pTag
+                ))
+            }
+        }
+        if let soft = software {
+            for deck in soft.liveDecks {
+                result.append(DeckSnapshot(
+                    label:     deck.shortName,
+                    title:     TrackNaming.cleanTitle(deck.title),
+                    artist:    deck.artist,
+                    bpm:       deck.bpm,
+                    isPlaying: deck.playing,
+                    isMaster:  false,
+                    elapsed:   deck.position,
+                    duration:  nil,
+                    progress:  nil,
+                    beatInBar: MusicalClock.beatInBar(position: deck.position, bpm: deck.bpm),
+                    tag:       Self.storedTag(deck.id, fallback: "\(deck.deckIndex + 1)")
                 ))
             }
         }
         return result
+    }
+
+    private static func storedTag(_ key: String, fallback: String) -> String {
+        let raw = UserDefaults.standard.dictionary(forKey: "sc.deckLabels.v1") as? [String: String]
+        if let t = raw?[key]?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty {
+            return t
+        }
+        return fallback
     }
 
     private func testDeckSnapshot(_ overlay: TestLinkDeck, label: String, master: Bool) -> DeckSnapshot {
@@ -822,32 +1058,28 @@ final class OutputController: ObservableObject {
     private func snapshotForDeckID(_ id: String) -> SyncSnapshot? {
         if id == DeckDisplayBuilder.testPioneerID || Self.sameDeckID(id, DeckDisplayBuilder.testPioneerID) {
             guard let overlay = pioneerTestOverlay() else { return nil }
-            return makeTestLinkSyncSnapshot(overlay, label: "CDJ-3000 TEST",
+            return makeTestLinkSyncSnapshot(overlay, label: DeckDisplayBuilder.productPioneerLabel(),
                                             id: DeckDisplayBuilder.testPioneerID,
                                             isMaster: overlay.isMaster || overlay.playing)
         }
         if id.hasPrefix("denon-test-"),
            let layer = Int(id.dropFirst("denon-test-".count)) {
             if let overlay = denonTestOverlay(layer: layer) {
-                let name = layer == 0 ? "A" : "B"
-                return makeTestLinkSyncSnapshot(overlay, label: "Denon TEST \(name)",
+                return makeTestLinkSyncSnapshot(overlay, label: DeckDisplayBuilder.productDenonLabel(layer: layer + 1),
                                                 id: DeckDisplayBuilder.testDenonID(layer),
                                                 isMaster: overlay.isMaster)
             }
         }
         if id.hasPrefix("denon-"), !id.hasPrefix("denon-test-"), let sl = stageLinq {
-            let denonOn = testLink?.roster.denonOn == true
             for device in sl.devices {
                 for deck in device.decks {
                     if "denon-\(device.id)-\(deck.id)" == id {
-                        let overlay = denonOn ? testLink?.snapshot?.deck(deck.id - 1) : nil
-                        return makeDenonSnapshot(deck: deck, device: device, overlay: overlay)
+                        return makeDenonSnapshot(deck: deck, device: device, overlay: denonOverlay(for: device, deck: deck))
                     }
                 }
             }
             if let layer = Self.denonLayer(id), let overlay = denonTestOverlay(layer: layer) {
-                let name = layer == 0 ? "A" : "B"
-                return makeTestLinkSyncSnapshot(overlay, label: "Denon TEST \(name)",
+                return makeTestLinkSyncSnapshot(overlay, label: DeckDisplayBuilder.productDenonLabel(layer: layer + 1),
                                                 id: DeckDisplayBuilder.testDenonID(layer),
                                                 isMaster: overlay.isMaster)
             }
@@ -886,11 +1118,13 @@ final class OutputController: ObservableObject {
         let bpm = MusicalClock.bpm(overlay?.bpm ?? 0, deck.bpm, deck.beatBpm)
         let playhead: Double? = {
             if let o = overlay { return o.position }
-            return deck.beatProgress.map { $0 * deck.trackLength }
+            if deck.trackLength > 0, let p = deck.beatProgress { return p * deck.trackLength }
+            if deck.currentBeat > 0, bpm > 0 { return deck.currentBeat * 60.0 / bpm }
+            return nil
         }()
         let playing = overlay?.playing ?? (deck.playState == .playing)
         let title = TrackNaming.cleanTitle(overlay?.title ?? deck.trackTitle)
-        let id = overlay != nil
+        let id = device.isDenonSimulator
             ? DeckDisplayBuilder.testDenonID(deck.id - 1)
             : "denon-\(device.id)-\(deck.id)"
         return SyncSnapshot(
@@ -903,7 +1137,9 @@ final class OutputController: ObservableObject {
                 : b,
             playhead: playhead,
             isPlaying: playing,
-            sourceLabel: "Denon deck \(deck.id)",
+            sourceLabel: device.isDenonSimulator
+                ? DeckDisplayBuilder.productDenonLabel(layer: deck.id)
+                : "SC6000 · \(DeckDisplayBuilder.displayDeviceName(device.name.isEmpty ? "SC6000" : device.name)) \(DeckDisplayBuilder.denonLayerCaption(deck.id))",
             trackTitle: title.isEmpty ? nil : title,
             trackArtist: (overlay?.artist ?? deck.trackArtist).isEmpty ? nil : (overlay?.artist ?? deck.trackArtist),
             sourceDeckID: id,
@@ -916,7 +1152,7 @@ final class OutputController: ObservableObject {
         let bpm = MusicalClock.bpm(overlay?.bpm ?? 0, device.effectiveBPM, device.trackBPM)
         let playhead: Double? = {
             if let o = overlay { return o.position }
-            return device.hasPosition ? device.playhead : nil
+            return device.resolvedPlayhead
         }()
         // Título: overlay TestLink tiene prioridad; si no, metadatos DBSERVER del CDJ
         let overlayTitle = overlay?.title ?? ""
@@ -935,7 +1171,7 @@ final class OutputController: ObservableObject {
                 : device.beatCount,
             playhead: playhead,
             isPlaying: overlay?.playing ?? device.isPlaying,
-            sourceLabel: "CDJ player \(device.playerNumber)",
+            sourceLabel: DeckDisplayBuilder.productPioneerLabel(player: Int(device.playerNumber), model: device.model),
             trackTitle: title.isEmpty ? nil : title,
             trackArtist: artist,
             trackKey: trackKey,
@@ -948,12 +1184,11 @@ final class OutputController: ObservableObject {
     // MARK: Master snapshot (fader / On Air / Master LED / el que suena)
 
     private func snapshotForMaster() -> SyncSnapshot {
-        if !ltcAutoFollow, let id = ltcSourceDeckID {
+        if !ltcAutoFollow, let id = ltcSourceDeckID, !isDeckLocked(id) {
             if let specific = snapshotForDeckID(id) { return specific }
             if let layer = Self.denonLayer(id),
                let overlay = denonTestOverlay(layer: layer) {
-                let name = layer == 0 ? "A" : "B"
-                return makeTestLinkSyncSnapshot(overlay, label: "Denon TEST \(name)",
+                return makeTestLinkSyncSnapshot(overlay, label: DeckDisplayBuilder.productDenonLabel(layer: layer + 1),
                                                 id: DeckDisplayBuilder.testDenonID(layer),
                                                 isMaster: overlay.isMaster)
             }
@@ -969,6 +1204,7 @@ final class OutputController: ObservableObject {
         var anyLoaded: SyncSnapshot?
 
         func consider(_ snap: SyncSnapshot) {
+            if let sid = snap.sourceDeckID, isDeckLocked(sid) { return }
             if snap.playhead != nil && anyLoaded == nil { anyLoaded = snap }
             if snap.isPlaying && anyPlaying == nil { anyPlaying = snap }
             if snap.isOnAir && snap.isPlaying && onAirPlaying == nil { onAirPlaying = snap }
@@ -979,24 +1215,22 @@ final class OutputController: ObservableObject {
         }
 
         if let sl = stageLinq {
-            let denonOn = testLink?.roster.denonOn == true
             for device in sl.devices {
-                for deck in device.decks where deck.songLoaded && !deck.trackTitle.isEmpty {
-                    let overlay = denonOn ? testLink?.snapshot?.deck(deck.id - 1) : nil
+                for deck in device.decks {
+                    let overlay = denonOverlay(for: device, deck: deck)
+                    guard overlay?.loaded ?? deck.songLoaded else { continue }
                     consider(makeDenonSnapshot(deck: deck, device: device, overlay: overlay))
                 }
             }
         }
 
-        if let overlay = denonTestOverlay(layer: 0) {
-            consider(makeTestLinkSyncSnapshot(overlay, label: "Denon TEST A",
-                                              id: DeckDisplayBuilder.testDenonID(0),
-                                              isMaster: overlay.isMaster))
-        }
-        if let overlay = denonTestOverlay(layer: 1) {
-            consider(makeTestLinkSyncSnapshot(overlay, label: "Denon TEST B",
-                                              id: DeckDisplayBuilder.testDenonID(1),
-                                              isMaster: overlay.isMaster))
+        if let layers = testLink?.roster.loadedLayers {
+            for idx in layers.indices {
+                guard let overlay = denonTestOverlay(layer: idx) else { continue }
+                consider(makeTestLinkSyncSnapshot(overlay, label: DeckDisplayBuilder.productDenonLabel(layer: idx + 1),
+                                                  id: DeckDisplayBuilder.testDenonID(idx),
+                                                  isMaster: overlay.isMaster))
+            }
         }
 
         if let pdl = proDJLink {
@@ -1007,7 +1241,7 @@ final class OutputController: ObservableObject {
         }
 
         if let overlay = pioneerTestOverlay() {
-            consider(makeTestLinkSyncSnapshot(overlay, label: "CDJ-3000 TEST",
+            consider(makeTestLinkSyncSnapshot(overlay, label: DeckDisplayBuilder.productPioneerLabel(),
                                               id: DeckDisplayBuilder.testPioneerID,
                                               isMaster: overlay.isMaster || overlay.playing))
         }
@@ -1029,15 +1263,36 @@ final class OutputController: ObservableObject {
         return testLink?.snapshot?.deck(layer)
     }
 
-    /// IDs estables: `denon-test-0` es la misma capa que `denon-<uuid>-1`.
+    /// TEST overlay solo en el SIM. Un SC6000 de la LAN no hereda título/reloj TEST.
+    private func denonOverlay(for device: StageLinqDevice, deck: DeckState) -> TestLinkDeck? {
+        guard testLink?.roster.denonOn == true, device.isDenonSimulator else { return nil }
+        return testLink?.snapshot?.deck(deck.id - 1)
+    }
+
+    /// `denon-test-0` ≡ SIM `denon-<localhost/SIM>-1`. Un SC6000 real no es esa capa:
+    /// LOCK/MASTER del TEST no pueden pisar el hardware (Dual 8 filas).
     static func sameDeckID(_ a: String, _ b: String) -> Bool {
         if a == b { return true }
         let aTest = a.hasPrefix("denon-test-")
         let bTest = b.hasPrefix("denon-test-")
-        if aTest || bTest, let la = denonLayer(a), let lb = denonLayer(b) {
-            return la == lb
+        guard aTest || bTest, let la = denonLayer(a), let lb = denonLayer(b), la == lb else {
+            return false
         }
-        return false
+        if aTest && bTest { return true }
+        return looksLikeDenonSimulatorID(aTest ? b : a)
+    }
+
+    private static func looksLikeDenonSimulatorID(_ id: String) -> Bool {
+        if id.hasPrefix("denon-test-") { return true }
+        let u = id.uppercased()
+        if StageLinqDevice.isDenonSimulatorName(id) { return true }
+        if u.contains("SC6000-SIM") || u.contains("SC6000 TEST") { return true }
+        guard id.hasPrefix("denon-"), !id.hasPrefix("denon-test-") else { return false }
+        let rest = String(id.dropFirst("denon-".count))
+        guard let dash = rest.lastIndex(of: "-") else { return false }
+        let hostPort = String(rest[..<dash])
+        let ip = hostPort.split(separator: ":").first.map(String.init) ?? hostPort
+        return NetworkInfo.isLocalIPv4(ip)
     }
 
     private static func denonLayer(_ id: String) -> Int? {
@@ -1055,9 +1310,6 @@ final class OutputController: ObservableObject {
     /// El simulador Pioneer local no pinta salidas: la fila `pioneer-test` ya
     /// lleva título/BPM/playhead por TestLink.
     private func shouldUsePioneer(_ device: ProDJLinkDevice) -> Bool {
-        if device.isOwnVirtualCDJ { return false }
-        if device.looksLikeLegacyFakeClock { return false }
-        if device.isLocalTestSimulator { return false }
-        return device.trackLoaded
+        device.isLANPlayerWithTrack
     }
 }

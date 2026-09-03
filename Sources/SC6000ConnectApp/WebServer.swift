@@ -1,18 +1,20 @@
 // WebServer.swift
-// Servidor HTTP embebido con SSE (Server-Sent Events) para monitorización
-// en tiempo real desde cualquier navegador en la misma red.
+// Servidor HTTP embebido con SSE y WebSocket para monitorización en vivo.
 //
 // Rutas:
 //   GET /        -- dashboard HTML completo (CDJ style)
 //   GET /api     -- JSON con estado actual de todos los decks
 //   GET /events  -- SSE stream tiempo real (push cada 250 ms)
+//   GET /ws      -- WebSocket, mismo JSON de decks (overlay propio / Resolume)
 
 import Foundation
 import Network
+import CryptoKit
 
 // MARK: - DeckSnapshot
 
 public struct DeckSnapshot: Encodable {
+    public var tag:         String
     public var label:       String
     public var title:       String
     public var artist:      String
@@ -24,6 +26,7 @@ public struct DeckSnapshot: Encodable {
     public var isOnAir:     Bool
     public var ltcSource:   Bool
     public var elapsed:     Double?
+    public var playhead:    Double?
     public var duration:    Double?
     public var progress:    Double?
     public var beatInBar:   Int
@@ -34,12 +37,14 @@ public struct DeckSnapshot: Encodable {
                 duration: Double?, progress: Double?, beatInBar: Int,
                 key: String = "", pitchPct: Double? = nil,
                 isOnAir: Bool = false, ltcSource: Bool = false,
-                tcTimecode: String? = nil) {
+                tcTimecode: String? = nil, tag: String = "") {
+        self.tag = tag.isEmpty ? label : tag
         self.label = label; self.title = title; self.artist = artist
         self.key = key; self.bpm = bpm; self.pitchPct = pitchPct
         self.isPlaying = isPlaying; self.isMaster = isMaster
         self.isOnAir = isOnAir; self.ltcSource = ltcSource
-        self.elapsed = elapsed; self.duration = duration
+        self.elapsed = elapsed; self.playhead = elapsed
+        self.duration = duration
         self.progress = progress; self.beatInBar = beatInBar
         self.tcTimecode = tcTimecode
     }
@@ -52,10 +57,13 @@ public final class WebServer {
     public var port: UInt16 = 8080
     public var isRunning: Bool { listener != nil }
     public var stateProvider: (() -> [DeckSnapshot])?
+    /// Puerto ocupado u otro fallo de bind. Se llama fuera del hilo de UI.
+    public var failureHandler: ((String) -> Void)?
 
     private var listener:    NWListener?
     private var connections: [ObjectIdentifier: NWConnection] = [:]
     private var sseClients:  [ObjectIdentifier: NWConnection] = [:]
+    private var wsClients:   [ObjectIdentifier: NWConnection] = [:]
     private var pushTimer:   DispatchSourceTimer?
     private let queue = DispatchQueue(label: "com.sc6000connect.webserver", qos: .utility)
     private let log: (String) -> Void
@@ -72,8 +80,22 @@ public final class WebServer {
         else { throw WebServerError.listenerFailed }
 
         l.stateUpdateHandler = { [weak self] state in
-            if case .ready = state {
-                self?.log("[Web] http://localhost:\(self?.port ?? 8080)")
+            guard let self else { return }
+            switch state {
+            case .ready:
+                self.log("[Web] http://localhost:\(self.port)  ·  /obs  ·  /ws")
+            case .failed(let err):
+                let raw = err as NSError
+                let msg: String
+                if raw.domain == NSPOSIXErrorDomain, raw.code == EADDRINUSE {
+                    msg = "Puerto \(self.port) ocupado. Cambia el puerto o cierra la otra app que lo usa."
+                } else {
+                    msg = "No se pudo abrir el puerto \(self.port)."
+                }
+                self.log("[Web] \(msg)")
+                self.failureHandler?(msg)
+            default:
+                break
             }
         }
         l.newConnectionHandler = { [weak self] conn in self?.handleConnection(conn) }
@@ -87,6 +109,7 @@ public final class WebServer {
         listener?.cancel(); listener = nil
         connections.values.forEach { $0.cancel() }; connections.removeAll()
         sseClients.removeAll()
+        wsClients.removeAll()
         log("[Web] Servidor detenido")
     }
 
@@ -95,25 +118,41 @@ public final class WebServer {
     private func startPushTimer() {
         let t = DispatchSource.makeTimerSource(queue: queue)
         t.schedule(deadline: .now() + 0.5, repeating: .milliseconds(250))
-        t.setEventHandler { [weak self] in self?.broadcastSSE() }
+        t.setEventHandler { [weak self] in self?.broadcastLive() }
         t.resume()
         pushTimer = t
     }
 
-    private func broadcastSSE() {
-        guard !sseClients.isEmpty else { return }
+    private func broadcastLive() {
+        if sseClients.isEmpty && wsClients.isEmpty { return }
         let snaps = stateProvider?() ?? []
         let encoder = JSONEncoder()
         guard let json = try? encoder.encode(snaps),
               let str  = String(data: json, encoding: .utf8) else { return }
-        let frame = Data("data: \(str)\n\n".utf8)
+        if !sseClients.isEmpty {
+            let frame = Data("data: \(str)\n\n".utf8)
+            pruneAndSend(sseClients, payload: frame) { sseClients = $0 }
+        }
+        if !wsClients.isEmpty {
+            let frame = Self.wsTextFrame(str)
+            pruneAndSend(wsClients, payload: frame) { wsClients = $0 }
+        }
+    }
+
+    private func pruneAndSend(
+        _ clients: [ObjectIdentifier: NWConnection],
+        payload: Data,
+        store: ([ObjectIdentifier: NWConnection]) -> Void
+    ) {
+        var live = clients
         var dead: [ObjectIdentifier] = []
-        for (key, conn) in sseClients {
+        for (key, conn) in live {
             if case .cancelled = conn.state { dead.append(key); continue }
             if case .failed    = conn.state { dead.append(key); continue }
-            conn.send(content: frame, completion: .idempotent)
+            conn.send(content: payload, completion: .idempotent)
         }
-        dead.forEach { sseClients.removeValue(forKey: $0) }
+        dead.forEach { live.removeValue(forKey: $0) }
+        store(live)
     }
 
     // MARK: Connection handling
@@ -131,20 +170,43 @@ public final class WebServer {
             let req  = String(bytes: data, encoding: .utf8) ?? ""
             let path = Self.parsePath(req)
             switch path {
+            case "/obs":
+                let transparent = Self.parseQuery(req)["t"] == "1"
+                let resp = self.obsResponse(transparent: transparent)
+                conn.send(content: resp, completion: .contentProcessed { _ in
+                    conn.cancel()
+                    self.connections.removeValue(forKey: key)
+                })
             case "/events":
                 let headers = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nAccess-Control-Allow-Origin: *\r\nConnection: keep-alive\r\n\r\n"
                 conn.send(content: Data(headers.utf8), completion: .contentProcessed { _ in })
                 self.sseClients[key] = conn
-                // keep alive — timer pushes data, cleanup in broadcastSSE
+            case "/ws":
+                self.upgradeWebSocket(conn, request: req, key: key)
+            case "/monitor":
+                let resp = self.monitorResponse()
+                conn.send(content: resp, completion: .contentProcessed { _ in
+                    conn.cancel()
+                    self.connections.removeValue(forKey: key)
+                })
             case "/api":
                 let resp = self.apiResponse()
                 conn.send(content: resp, completion: .contentProcessed { _ in
                     conn.cancel()
                     self.connections.removeValue(forKey: key)
                 })
-            default:
+            case "/", "":
                 let resp = self.htmlResponse()
                 conn.send(content: resp, completion: .contentProcessed { _ in
+                    conn.cancel()
+                    self.connections.removeValue(forKey: key)
+                })
+            default:
+                // /query y el resto no son el dashboard: VirtualDJ sondea
+                // :8080/query y un 200 HTML lo tomaba por Network Control.
+                let body = Data("not found".utf8)
+                conn.send(content: self.httpResponse(404, "text/plain; charset=utf-8", body),
+                          completion: .contentProcessed { _ in
                     conn.cancel()
                     self.connections.removeValue(forKey: key)
                 })
@@ -158,8 +220,38 @@ public final class WebServer {
         return httpResponse(200, "application/json", body)
     }
 
+    private func monitorResponse() -> Data {
+        let snaps = stateProvider?() ?? []
+        let tc = snaps.first(where: { $0.ltcSource })?.tcTimecode
+            ?? snaps.first(where: { $0.isMaster })?.tcTimecode
+            ?? snaps.first(where: { $0.isPlaying })?.tcTimecode
+            ?? snaps.compactMap(\.tcTimecode).first
+            ?? "00:00:00:00"
+        let payload: [String: Any] = [
+            "tc": tc,
+            "decks": snaps.map { s -> [String: Any] in
+                [
+                    "tag": s.tag,
+                    "label": s.label,
+                    "title": s.title,
+                    "artist": s.artist,
+                    "bpm": s.bpm,
+                    "isPlaying": s.isPlaying,
+                    "isMaster": s.isMaster,
+                    "tcTimecode": s.tcTimecode ?? ""
+                ]
+            }
+        ]
+        let body = (try? JSONSerialization.data(withJSONObject: payload)) ?? Data("{}".utf8)
+        return httpResponse(200, "application/json", body)
+    }
+
     private func htmlResponse() -> Data {
         httpResponse(200, "text/html; charset=utf-8", Data(Self.monitorHTML.utf8))
+    }
+
+    private func obsResponse(transparent: Bool) -> Data {
+        httpResponse(200, "text/html; charset=utf-8", Data(Self.obsHTML(transparent: transparent).utf8))
     }
 
     private func httpResponse(_ code: Int, _ ct: String, _ body: Data) -> Data {
@@ -170,7 +262,76 @@ public final class WebServer {
     private static func parsePath(_ req: String) -> String {
         let line  = req.split(separator: "\r").first ?? ""
         let parts = line.split(separator: " ")
-        return parts.count >= 2 ? String(parts[1]) : "/"
+        let raw = parts.count >= 2 ? String(parts[1]) : "/"
+        return raw.split(separator: "?").first.map(String.init) ?? raw
+    }
+
+    private static func parseQuery(_ req: String) -> [String: String] {
+        let line  = req.split(separator: "\r").first ?? ""
+        let parts = line.split(separator: " ")
+        let raw = parts.count >= 2 ? String(parts[1]) : "/"
+        guard let q = raw.split(separator: "?").dropFirst().first else { return [:] }
+        var out: [String: String] = [:]
+        for pair in q.split(separator: "&") {
+            let kv = pair.split(separator: "=", maxSplits: 1)
+            if let k = kv.first { out[String(k)] = kv.count > 1 ? String(kv[1]) : "" }
+        }
+        return out
+    }
+
+    private static func headerValue(_ req: String, _ name: String) -> String? {
+        for line in req.split(whereSeparator: \.isNewline) {
+            let s = String(line)
+            if s.lowercased().hasPrefix(name.lowercased() + ":") {
+                return s.dropFirst(name.count + 1).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+        return nil
+    }
+
+    private func upgradeWebSocket(_ conn: NWConnection, request: String, key: ObjectIdentifier) {
+        let upgrade = (Self.headerValue(request, "Upgrade") ?? "").lowercased()
+        guard upgrade.contains("websocket"),
+              let wsKey = Self.headerValue(request, "Sec-WebSocket-Key"), !wsKey.isEmpty else {
+            let body = Data("WebSocket: conecta a ws://host:\(port)/ws".utf8)
+            conn.send(content: httpResponse(400, "text/plain; charset=utf-8", body),
+                      completion: .contentProcessed { _ in
+                conn.cancel()
+                self.connections.removeValue(forKey: key)
+            })
+            return
+        }
+        let accept = Self.wsAccept(wsKey)
+        let headers = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: \(accept)\r\n\r\n"
+        conn.send(content: Data(headers.utf8), completion: .contentProcessed { _ in })
+        wsClients[key] = conn
+        log("[Web] WebSocket conectado")
+    }
+
+    private static func wsAccept(_ key: String) -> String {
+        let magic = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+        let digest = Insecure.SHA1.hash(data: Data((key + magic).utf8))
+        return Data(digest).base64EncodedString()
+    }
+
+    private static func wsTextFrame(_ text: String) -> Data {
+        let payload = Array(text.utf8)
+        var frame = Data()
+        frame.append(0x81)
+        let len = payload.count
+        if len < 126 {
+            frame.append(UInt8(len))
+        } else if len <= 65535 {
+            frame.append(126)
+            frame.append(UInt8((len >> 8) & 0xFF))
+            frame.append(UInt8(len & 0xFF))
+        } else {
+            frame.append(127)
+            var n = UInt64(len).bigEndian
+            withUnsafeBytes(of: &n) { frame.append(contentsOf: $0) }
+        }
+        frame.append(contentsOf: payload)
+        return frame
     }
 
     public enum WebServerError: Error { case listenerFailed }
@@ -331,4 +492,53 @@ setInterval(()=>{if(Date.now()-lastUpdate>5000&&!evtSource)connect()},3000);
 </body>
 </html>
 """#
+
+    private static func obsHTML(transparent: Bool) -> String {
+        let bg = transparent ? "transparent" : "#000"
+        return #"""
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>STAGE CONNECT</title>
+<style>
+html,body{margin:0;padding:0;width:1920px;height:1080px;overflow:hidden;background:\#(bg);color:#fff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
+.wrap{display:flex;flex-direction:column;height:1080px;padding:36px 48px;box-sizing:border-box}
+.tc{font:800 168px/0.9 'SF Mono','Menlo',monospace;letter-spacing:-4px;color:#fff;text-shadow:0 0 24px rgba(0,0,0,.55)}
+.master{margin-top:8px;font-size:28px;font-weight:700;letter-spacing:2px;color:#00e676}
+.decks{margin-top:auto;display:grid;grid-template-columns:repeat(4,1fr);gap:18px}
+.deck{min-height:118px}
+.tag{font-size:13px;font-weight:800;letter-spacing:1.4px;color:#8a8a9a}
+.play{color:#00e676}
+.title{font-size:22px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bpm{font:700 20px 'SF Mono',monospace;color:#f5a623}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="tc" id="tc">00:00:00:00</div>
+  <div class="master" id="master"></div>
+  <div class="decks" id="decks"></div>
+</div>
+<script>
+function esc(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')}
+function paint(decks){
+  const master=decks.find(d=>d.isMaster)||decks.find(d=>d.isPlaying)||decks[0];
+  const tc=(master&&master.tcTimecode)||(decks.find(d=>d.tcTimecode)||{}).tcTimecode||'00:00:00:00';
+  document.getElementById('tc').textContent=tc;
+  document.getElementById('master').textContent=master?(master.title||''):'';
+  document.getElementById('decks').innerHTML=decks.slice(0,4).map(d=>`
+    <div class="deck">
+      <div class="tag${d.isPlaying?' play':''}">${esc((d.tag||d.label||'').toUpperCase())}${d.isPlaying?'  PLAY':''}</div>
+      <div class="title">${esc(d.title||'—')}</div>
+      <div class="bpm">${d.bpm>0?d.bpm.toFixed(2)+' BPM':''}</div>
+    </div>`).join('');
+}
+const ev=new EventSource('/events');
+ev.onmessage=e=>{try{paint(JSON.parse(e.data))}catch(_){}};
+</script>
+</body>
+</html>
+"""#
+    }
 }

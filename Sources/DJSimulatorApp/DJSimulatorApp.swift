@@ -38,11 +38,15 @@ struct LoadedTrack {
     var peaksMid: [Float]
     var peaksHigh: [Float]
     var cues: [Double]
+    var loopIn: Double?
+    var loopOut: Double?
     var bpm: Double
     var key: String
     var genre: String
     var album: String
     var comment: String
+    var artworkPath: String
+    var artworkJPEG: String
 }
 
 // Cache leíble desde el hilo del simulador (clock / StateMap) sin tocar @MainActor.
@@ -70,10 +74,12 @@ final class DeckStateCache: @unchecked Sendable {
 final class DeckAudioPlayer {
     private let engine = AVAudioEngine()
     private let node = AVAudioPlayerNode()
+    private let varispeed = AVAudioUnitVarispeed()
     private var pcmBuffer: AVAudioPCMBuffer?
     private var startFrame: AVAudioFramePosition = 0
     private var sampleRate: Double = 44100
     private var lengthFrames: AVAudioFramePosition = 0
+    private var rate: Float = 1
 
     var duration: Double {
         guard sampleRate > 0 else { return 0 }
@@ -96,7 +102,15 @@ final class DeckAudioPlayer {
 
     init() {
         engine.attach(node)
-        engine.connect(node, to: engine.mainMixerNode, format: nil)
+        engine.attach(varispeed)
+        engine.connect(node, to: varispeed, format: nil)
+        engine.connect(varispeed, to: engine.mainMixerNode, format: nil)
+    }
+
+    /// 1.0 = 0 %. El playhead de `currentTime` sigue en segundos de disco.
+    func setRate(_ value: Float) {
+        rate = max(0.5, min(2.0, value))
+        varispeed.rate = rate
     }
 
     func load(url: URL) throws {
@@ -114,7 +128,10 @@ final class DeckAudioPlayer {
         try f.read(into: buf)
         pcmBuffer = buf
         engine.disconnectNodeOutput(node)
-        engine.connect(node, to: engine.mainMixerNode, format: format)
+        engine.disconnectNodeOutput(varispeed)
+        engine.connect(node, to: varispeed, format: format)
+        engine.connect(varispeed, to: engine.mainMixerNode, format: format)
+        varispeed.rate = rate
         engine.prepare()
         if !engine.isRunning {
             try engine.start()
@@ -210,6 +227,13 @@ final class SimulatorController: ObservableObject {
     @Published var playingB = false
     @Published var bpmA: Double = 0
     @Published var bpmB: Double = 0
+    @Published var pitchA: Double = 0
+    @Published var pitchB: Double = 0
+    @Published var pitchRange: Double = 8
+    @Published var syncA = false
+    @Published var syncB = false
+    @Published var cueA: Double = 0
+    @Published var cueB: Double = 0
 
     // Network
     @Published var denonRunning = false
@@ -224,6 +248,7 @@ final class SimulatorController: ObservableObject {
 
     private let stateCache = DeckStateCache()
     private let testLink = TestLinkPublisher()
+    private var keyMonitor: Any?
 
     init() {
         let t = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
@@ -231,15 +256,56 @@ final class SimulatorController: ObservableObject {
         }
         RunLoop.main.add(t, forMode: .common)
         posTimer = t
+        startKeyMonitor()
+    }
+
+    func startKeyMonitor() {
+        guard keyMonitor == nil else { return }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return event }
+            if event.isARepeat { return event }
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            if flags.contains(.command) || flags.contains(.control) { return event }
+            if Self.isTyping() { return event }
+            let ch = event.charactersIgnoringModifiers?.lowercased() ?? ""
+            switch ch {
+            case "1": self.togglePlay(deck: 1); return nil
+            case "2": self.togglePlay(deck: 2); return nil
+            case "d": self.toggleDenon(); return nil
+            case "p": self.togglePioneer(); return nil
+            default: return event
+            }
+        }
+    }
+
+    private static func isTyping() -> Bool {
+        guard let resp = NSApp.keyWindow?.firstResponder else { return false }
+        return resp is NSTextView || resp is NSTextField || resp is NSText
     }
 
     /// BPM que sale por TestLink y por el simulador de red. Nunca 0 si hay pista
     /// y ya se analizó o el usuario lo tocó.
     private func publishedBPM(deck: Int) -> Double {
-        if deck == 1 {
-            return MusicalClock.bpm(bpmA, trackA?.bpm ?? 0)
-        }
-        return MusicalClock.bpm(bpmB, trackB?.bpm ?? 0)
+        let base = deck == 1
+            ? MusicalClock.bpm(bpmA, trackA?.bpm ?? 0)
+            : MusicalClock.bpm(bpmB, trackB?.bpm ?? 0)
+        let pitch = deck == 1 ? pitchA : pitchB
+        guard base > 0 else { return 0 }
+        return base * (1.0 + pitch / 100.0)
+    }
+
+    private func applyPitch(deck: Int) {
+        let pct = deck == 1 ? pitchA : pitchB
+        let player = deck == 1 ? audioA : audioB
+        player.setRate(Float(1.0 + pct / 100.0))
+        pushState()
+    }
+
+    func setPitch(deck: Int, percent: Double) {
+        let limit = pitchRange
+        let v = max(-limit, min(limit, percent))
+        if deck == 1 { pitchA = v } else { pitchB = v }
+        applyPitch(deck: deck)
     }
 
     /// Fuente de verdad para Denon/Pioneer: escribir en cada play/pausa/seek/carga.
@@ -264,7 +330,14 @@ final class SimulatorController: ObservableObject {
                     comment: trackA?.comment ?? "",
                     peaksLow: TestLinkDeck.quantize(trackA?.peaksLow ?? []),
                     peaksMid: TestLinkDeck.quantize(trackA?.peaksMid ?? []),
-                    peaksHigh: TestLinkDeck.quantize(trackA?.peaksHigh ?? [])
+                    peaksHigh: TestLinkDeck.quantize(trackA?.peaksHigh ?? []),
+                    artworkPath: trackA?.artworkPath ?? "",
+                    artworkJPEG: trackA?.artworkJPEG ?? "",
+                    cues: trackA?.cues ?? [],
+                    loopIn: trackA?.loopIn ?? -1,
+                    loopOut: trackA?.loopOut ?? -1,
+                    pitch: pitchA,
+                    isSync: syncA
                 ),
                 TestLinkDeck(
                     title: trackB?.title ?? "",
@@ -281,7 +354,14 @@ final class SimulatorController: ObservableObject {
                     comment: trackB?.comment ?? "",
                     peaksLow: TestLinkDeck.quantize(trackB?.peaksLow ?? []),
                     peaksMid: TestLinkDeck.quantize(trackB?.peaksMid ?? []),
-                    peaksHigh: TestLinkDeck.quantize(trackB?.peaksHigh ?? [])
+                    peaksHigh: TestLinkDeck.quantize(trackB?.peaksHigh ?? []),
+                    artworkPath: trackB?.artworkPath ?? "",
+                    artworkJPEG: trackB?.artworkJPEG ?? "",
+                    cues: trackB?.cues ?? [],
+                    loopIn: trackB?.loopIn ?? -1,
+                    loopOut: trackB?.loopOut ?? -1,
+                    pitch: pitchB,
+                    isSync: syncB
                 )
             ]
         ))
@@ -315,7 +395,9 @@ final class SimulatorController: ObservableObject {
                 positionSeconds: posA * (trackA?.duration ?? 0),
                 duration: trackA?.duration ?? 0,
                 isMaster: playingA || !playingB,
-                key: trackA?.key ?? ""),
+                key: trackA?.key ?? "",
+                pitchPercent: pitchA,
+                isSync: syncA),
             SimDeckState(
                 title: trackB?.title ?? "",
                 artist: trackB?.artist ?? "",
@@ -324,7 +406,9 @@ final class SimulatorController: ObservableObject {
                 positionSeconds: posB * (trackB?.duration ?? 0),
                 duration: trackB?.duration ?? 0,
                 isMaster: playingB && !playingA,
-                key: trackB?.key ?? "")
+                key: trackB?.key ?? "",
+                pitchPercent: pitchB,
+                isSync: syncB)
         ]
     }
 
@@ -356,6 +440,11 @@ final class SimulatorController: ObservableObject {
                 if !tagged.genre.isEmpty { track.genre = tagged.genre }
                 if !tagged.album.isEmpty { track.album = tagged.album }
                 if !tagged.comment.isEmpty { track.comment = tagged.comment }
+                if track.artworkPath.isEmpty || track.artworkJPEG.isEmpty {
+                    let art = Self.extractArtwork(url: imported)
+                    if track.artworkPath.isEmpty { track.artworkPath = art.path }
+                    if track.artworkJPEG.isEmpty { track.artworkJPEG = art.jpeg }
+                }
                 do {
                     if deck == 1 {
                         self.audioA.stopAndReset()
@@ -364,7 +453,7 @@ final class SimulatorController: ObservableObject {
                         self.posA = 0
                         self.playingA = false
                         self.bpmA = track.bpm
-                        self.log("[Deck A] \(track.title) — \(String(format:"%.1f",track.duration))s \(track.bpm > 0 ? String(format:"%.1f BPM", track.bpm) : "sin BPM detectado")")
+                        self.log("[Deck A] \(track.title) — \(String(format:"%.1f",track.duration))s \(track.bpm > 0 ? String(format:"%.1f BPM", track.bpm) : "sin BPM detectado")\(track.artworkPath.isEmpty && track.artworkJPEG.isEmpty ? "" : " · portada")")
                     } else {
                         self.audioB.stopAndReset()
                         try self.audioB.load(url: imported)
@@ -372,7 +461,7 @@ final class SimulatorController: ObservableObject {
                         self.posB = 0
                         self.playingB = false
                         self.bpmB = track.bpm
-                        self.log("[Deck B] \(track.title) — \(String(format:"%.1f",track.duration))s \(track.bpm > 0 ? String(format:"%.1f BPM", track.bpm) : "sin BPM detectado")")
+                        self.log("[Deck B] \(track.title) — \(String(format:"%.1f",track.duration))s \(track.bpm > 0 ? String(format:"%.1f BPM", track.bpm) : "sin BPM detectado")\(track.artworkPath.isEmpty && track.artworkJPEG.isEmpty ? "" : " · portada")")
                     }
                     self.pushState()
                 } catch {
@@ -496,6 +585,40 @@ final class SimulatorController: ObservableObject {
         let pos = deck == 1 ? posA * (trackA?.duration ?? 0) : posB * (trackB?.duration ?? 0)
         if deck == 1 { trackA?.cues.append(pos) }
         else { trackB?.cues.append(pos) }
+        pushState()
+    }
+
+    func setLoopIn(deck: Int) {
+        let pos = deck == 1 ? posA * (trackA?.duration ?? 0) : posB * (trackB?.duration ?? 0)
+        if deck == 1 { trackA?.loopIn = pos }
+        else { trackB?.loopIn = pos }
+        normalizeLoop(deck: deck)
+        pushState()
+    }
+
+    func setLoopOut(deck: Int) {
+        let pos = deck == 1 ? posA * (trackA?.duration ?? 0) : posB * (trackB?.duration ?? 0)
+        if deck == 1 { trackA?.loopOut = pos }
+        else { trackB?.loopOut = pos }
+        normalizeLoop(deck: deck)
+        pushState()
+    }
+
+    func clearLoop(deck: Int) {
+        if deck == 1 { trackA?.loopIn = nil; trackA?.loopOut = nil }
+        else { trackB?.loopIn = nil; trackB?.loopOut = nil }
+        pushState()
+    }
+
+    private func normalizeLoop(deck: Int) {
+        if deck == 1, let a = trackA?.loopIn, let b = trackA?.loopOut, b < a {
+            trackA?.loopIn = b
+            trackA?.loopOut = a
+        }
+        if deck == 2, let a = trackB?.loopIn, let b = trackB?.loopOut, b < a {
+            trackB?.loopIn = b
+            trackB?.loopOut = a
+        }
     }
 
     func jumpCue(deck: Int, seconds: Double) {
@@ -506,6 +629,7 @@ final class SimulatorController: ObservableObject {
     func deleteCue(deck: Int, seconds: Double) {
         if deck == 1 { trackA?.cues.removeAll { abs($0 - seconds) < 0.5 } }
         else { trackB?.cues.removeAll { abs($0 - seconds) < 0.5 } }
+        pushState()
     }
 
     // MARK: - Network simulators
@@ -540,7 +664,7 @@ final class SimulatorController: ObservableObject {
             pioneer = sim
             pioneerRunning = true
             pushState()
-            log("[Pioneer] Activo como CDJ-3000. STAGE CONNECT muestra título, BPM y waveform reales.")
+            log("[Pioneer] Activo como CDJ-3000")
         }
     }
 
@@ -575,18 +699,215 @@ final class SimulatorController: ObservableObject {
 
         let names = TrackNaming.parse(fileURL: url)
         let bpm = estimateBPM(samples: samples, sampleRate: fmt.sampleRate)
+        let art = extractArtwork(url: url)
         return LoadedTrack(url: url, title: names.title, artist: names.artist,
                            duration: duration, peaks: peaks, peaksLow: peaksLow,
-                           peaksMid: peaksMid, peaksHigh: peaksHigh, cues: [], bpm: bpm, key: "",
-                           genre: "", album: "", comment: "")
+                           peaksMid: peaksMid, peaksHigh: peaksHigh, cues: [],
+                           loopIn: nil, loopOut: nil, bpm: bpm, key: "",
+                           genre: "", album: "", comment: "",
+                           artworkPath: art.path, artworkJPEG: art.jpeg)
+    }
+
+    /// Portada embebida (AVAsset, ID3 APIC, iTunes covr, AIFF). JPEG válido + miniatura.
+    nonisolated static func extractArtwork(url: URL) -> (path: String, jpeg: String) {
+        var raw: Data?
+        if let fromAsset = artworkDataFromAsset(url: url) { raw = fromAsset }
+        if raw == nil { raw = artworkDataFromID3(url: url) }
+        if raw == nil { raw = artworkDataFromM4A(url: url) }
+        guard let raw, let imageData = unwrapImageData(raw), let image = NSImage(data: imageData) else {
+            return ("", "")
+        }
+        let dir = StageConnectArtworkStore.writableDirectory()
+        let dest = dir.appendingPathComponent("sct-art-\(abs(url.path.hashValue)).jpg")
+        let full = jpegData(from: image, maxEdge: 400, quality: 0.78)
+        if let full { try? full.write(to: dest, options: .atomic) }
+        let path = FileManager.default.fileExists(atPath: dest.path) ? dest.path : ""
+        let jpeg = boundedArtworkJPEG(from: image)
+        return (path, jpeg)
+    }
+
+    /// Miniatura que cabe en TestLink (`maxArtworkJPEGChars`) y se pinta si la ruta falla.
+    nonisolated static func boundedArtworkJPEG(from image: NSImage) -> String {
+        let attempts: [(CGFloat, CGFloat)] = [(72, 0.55), (56, 0.48), (40, 0.40)]
+        for (edge, quality) in attempts {
+            guard let data = jpegData(from: image, maxEdge: edge, quality: quality) else { continue }
+            let b64 = data.base64EncodedString()
+            if b64.count <= TestLinkDeck.maxArtworkJPEGChars { return b64 }
+        }
+        return ""
+    }
+
+    nonisolated static func extractArtworkPath(url: URL) -> String {
+        extractArtwork(url: url).path
+    }
+
+    nonisolated private static func artworkDataFromAsset(url: URL) -> Data? {
+        let asset = AVURLAsset(url: url)
+        let sem = DispatchSemaphore(value: 0)
+        asset.loadValuesAsynchronously(forKeys: ["commonMetadata", "metadata"]) {
+            sem.signal()
+        }
+        _ = sem.wait(timeout: .now() + 2.0)
+        for item in asset.commonMetadata + asset.metadata {
+            let ident = item.identifier?.rawValue.lowercased() ?? ""
+            let isArt = item.commonKey == .commonKeyArtwork
+                || ident.contains("artwork") || ident.contains("covr")
+                || ident.contains("apic") || ident.contains("picture")
+            guard isArt else { continue }
+            if let d = item.dataValue, d.count > 32 { return d }
+            if let d = item.value as? Data, d.count > 32 { return d }
+            if let img = item.value as? NSImage, let tiff = img.tiffRepresentation { return tiff }
+        }
+        return nil
+    }
+
+    nonisolated private static func unwrapImageData(_ data: Data) -> Data? {
+        if data.count > 4, data[0] == 0xFF, data[1] == 0xD8 { return data }
+        if data.starts(with: [0x89, 0x50, 0x4E, 0x47]) { return data }
+        if data.count > 8 {
+            let s4 = data.dropFirst(4)
+            if s4.starts(with: [0xFF, 0xD8]) || s4.starts(with: [0x89, 0x50]) { return Data(s4) }
+            let s8 = data.dropFirst(8)
+            if s8.starts(with: [0xFF, 0xD8]) || s8.starts(with: [0x89, 0x50]) { return Data(s8) }
+        }
+        if let r = data.range(of: Data([0xFF, 0xD8, 0xFF])) { return Data(data[r.lowerBound...]) }
+        if let r = data.range(of: Data([0x89, 0x50, 0x4E, 0x47])) { return Data(data[r.lowerBound...]) }
+        return NSImage(data: data) != nil ? data : nil
+    }
+
+    nonisolated private static func jpegData(from image: NSImage, maxEdge: CGFloat, quality: CGFloat) -> Data? {
+        guard let src = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            guard let tiff = image.tiffRepresentation,
+                  let rep = NSBitmapImageRep(data: tiff) else { return nil }
+            return rep.representation(using: .jpeg, properties: [.compressionFactor: quality])
+        }
+        let scale = min(1, maxEdge / max(CGFloat(src.width), CGFloat(src.height), 1))
+        let nw = max(1, Int(CGFloat(src.width) * scale))
+        let nh = max(1, Int(CGFloat(src.height) * scale))
+        let space = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: nil, width: nw, height: nh, bitsPerComponent: 8, bytesPerRow: 0,
+            space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        ctx.interpolationQuality = .high
+        ctx.draw(src, in: CGRect(x: 0, y: 0, width: nw, height: nh))
+        guard let out = ctx.makeImage() else { return nil }
+        return NSBitmapImageRep(cgImage: out)
+            .representation(using: .jpeg, properties: [.compressionFactor: quality])
+    }
+
+    nonisolated private static func artworkDataFromID3(url: URL) -> Data? {
+        guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]),
+              data.count > 16 else { return nil }
+        if data.starts(with: [0x49, 0x44, 0x33]) {
+            return parseID3APIC(data)
+        }
+        if let range = data.range(of: Data([0x49, 0x44, 0x33])), range.lowerBound > 0 {
+            return parseID3APIC(data.subdata(in: range.lowerBound..<data.count))
+        }
+        return nil
+    }
+
+    nonisolated private static func parseID3APIC(_ data: Data) -> Data? {
+        guard data.count > 10, data.starts(with: [0x49, 0x44, 0x33]) else { return nil }
+        let ver = data[3]
+        let unsyncSize: Int = {
+            let b = data[6], c = data[7], d = data[8], e = data[9]
+            return ((Int(b) & 0x7F) << 21) | ((Int(c) & 0x7F) << 14) | ((Int(d) & 0x7F) << 7) | (Int(e) & 0x7F)
+        }()
+        var i = 10
+        if data[5] & 0x40 != 0, i + 4 <= data.count {
+            let ext: Int
+            if ver >= 4 {
+                let b = data[i], c = data[i+1], d = data[i+2], e = data[i+3]
+                ext = ((Int(b) & 0x7F) << 21) | ((Int(c) & 0x7F) << 14) | ((Int(d) & 0x7F) << 7) | (Int(e) & 0x7F)
+            } else {
+                ext = Int(data[i]) << 24 | Int(data[i+1]) << 16 | Int(data[i+2]) << 8 | Int(data[i+3])
+            }
+            i += max(4, ext)
+        }
+        let end = min(data.count, 10 + unsyncSize)
+        while i + 10 < end {
+            if ver == 2 {
+                let id = String(bytes: data[i..<i+3], encoding: .ascii) ?? ""
+                let size = Int(data[i+3]) << 16 | Int(data[i+4]) << 8 | Int(data[i+5])
+                i += 6
+                guard size > 0, i + size <= data.count else { break }
+                if id == "PIC" { return unwrapImageData(data.subdata(in: i..<i+size)) }
+                i += size
+                continue
+            }
+            let id = String(bytes: data[i..<i+4], encoding: .ascii) ?? ""
+            let size: Int
+            if ver >= 4 {
+                let b = data[i+4], c = data[i+5], d = data[i+6], e = data[i+7]
+                size = ((Int(b) & 0x7F) << 21) | ((Int(c) & 0x7F) << 14) | ((Int(d) & 0x7F) << 7) | (Int(e) & 0x7F)
+            } else {
+                size = Int(data[i+4]) << 24 | Int(data[i+5]) << 16 | Int(data[i+6]) << 8 | Int(data[i+7])
+            }
+            i += 10
+            guard size > 0, i + size <= data.count else { break }
+            if id == "APIC" {
+                return apicPayload(data.subdata(in: i..<i+size))
+            }
+            i += size
+        }
+        return nil
+    }
+
+    nonisolated private static func apicPayload(_ payload: Data) -> Data? {
+        guard payload.count > 8 else { return unwrapImageData(payload) }
+        var i = 1
+        while i < payload.count, payload[i] != 0 { i += 1 }
+        i += 2
+        guard i < payload.count else { return unwrapImageData(payload) }
+        let enc = payload[0]
+        if enc == 0 || enc == 3 {
+            while i < payload.count, payload[i] != 0 { i += 1 }
+            i += 1
+        } else {
+            while i + 1 < payload.count, !(payload[i] == 0 && payload[i+1] == 0) { i += 1 }
+            i += 2
+        }
+        guard i < payload.count else { return unwrapImageData(payload) }
+        return unwrapImageData(payload.subdata(in: i..<payload.count)) ?? unwrapImageData(payload)
+    }
+
+    nonisolated private static func artworkDataFromM4A(url: URL) -> Data? {
+        guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]),
+              data.count > 16 else { return nil }
+        return findAtom(data, name: "covr", from: 0, to: min(data.count, 8_000_000))
+    }
+
+    nonisolated private static func findAtom(_ data: Data, name: String, from: Int, to: Int) -> Data? {
+        var i = from
+        let needle = Array(name.utf8)
+        let containers: Set<String> = ["moov", "udta", "meta", "ilst", "trak", "mdia"]
+        while i + 8 <= to {
+            let size = Int(data[i]) << 24 | Int(data[i+1]) << 16 | Int(data[i+2]) << 8 | Int(data[i+3])
+            guard size >= 8, i + size <= data.count else { break }
+            let four = String(bytes: data[i+4..<i+8], encoding: .ascii) ?? ""
+            if data[i+4] == needle[0], data[i+5] == needle[1],
+               data[i+6] == needle[2], data[i+7] == needle[3] {
+                return unwrapImageData(data.subdata(in: i+8..<i+size))
+            }
+            if containers.contains(four) {
+                let innerFrom = four == "meta" ? i + 12 : i + 8
+                if let inner = findAtom(data, name: name, from: innerFrom, to: min(i + size, to)) {
+                    return inner
+                }
+            }
+            i += size
+        }
+        return nil
     }
 
     /// Crossover complementario: low <250 Hz, mid 250–4 kHz, high >4 kHz.
-    /// RMS + pico por columna; ~7200 columnas reales del audio.
+    /// RMS + pico por columna; ~12000 columnas reales del audio.
     nonisolated static func analyzeBands(samples: [Float], sampleRate: Double) -> (amp: [Float], low: [Float], mid: [Float], high: [Float]) {
         let n = samples.count
         let target = TestLinkDeck.waveformColumns
-        let minHop = max(1, Int(sampleRate * 0.006))
+        let minHop = max(1, Int(sampleRate * 0.003))
         let hop = max(minHop, max(1, n / target))
         let count = max(64, min(target, (n + hop - 1) / hop))
         let aLow = Float(1 - exp(-2.0 * Double.pi * 250.0 / max(1, sampleRate)))
@@ -828,14 +1149,19 @@ private struct AppHeader: View {
                     .font(.system(size: 13, weight: .black))
                     .tracking(1.8)
                     .foregroundColor(Color(red: 0.95, green: 0.65, blue: 0.1))
-                Text("Simulador de reproductores — misma red que STAGE CONNECT")
+                Text("Denon y Pioneer · misma red que STAGE CONNECT")
                     .font(.system(size: 10))
                     .foregroundColor(.secondary)
             }
             Spacer()
-            Text("entikrecords.com")
-                .font(.system(size: 10))
-                .foregroundColor(Color.secondary.opacity(0.4))
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("entikrecords.com")
+                        .font(.system(size: 10))
+                        .foregroundColor(Color.secondary.opacity(0.4))
+                    Text("1/2 play  ·  D Denon  ·  P Pioneer")
+                        .font(.system(size: 9))
+                        .foregroundColor(Color.secondary.opacity(0.35))
+                }
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 12)
@@ -853,7 +1179,41 @@ private struct DeckPanel: View {
     private var pos: Double        { deck == 1 ? ctrl.posA    : ctrl.posB }
     private var playing: Bool      { deck == 1 ? ctrl.playingA : ctrl.playingB }
     private var bpm: Double        { deck == 1 ? ctrl.bpmA    : ctrl.bpmB }
+    private var pitch: Double      { deck == 1 ? ctrl.pitchA  : ctrl.pitchB }
     private var accent: Color      { deck == 1 ? Color(red:0.1,green:0.82,blue:0.5) : Color(red:0.25,green:0.6,blue:1) }
+    private var effectiveBPM: Double {
+        bpm > 0 ? bpm * (1.0 + pitch / 100.0) : 0
+    }
+
+    private var pitchRow: some View {
+        VStack(spacing: 4) {
+            HStack {
+                Text("PITCH")
+                    .font(.system(size: 9, weight: .bold)).tracking(0.8)
+                    .foregroundColor(.secondary)
+                Text(String(format: "%+.2f%%", pitch))
+                    .font(.system(size: 14, weight: .bold, design: .monospaced))
+                    .foregroundColor(accent)
+                Text(effectiveBPM > 0 ? String(format: "%.2f eBPM", effectiveBPM) : "")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.secondary)
+                Spacer()
+                ForEach([8.0, 10.0, 16.0], id: \.self) { r in
+                    Button("±\(Int(r))") { ctrl.pitchRange = r; ctrl.setPitch(deck: deck, percent: pitch) }
+                        .buttonStyle(MiniBtn())
+                        .opacity(ctrl.pitchRange == r ? 1 : 0.45)
+                }
+                Button("0") { ctrl.setPitch(deck: deck, percent: 0) }.buttonStyle(MiniBtn())
+            }
+            Slider(value: Binding(
+                get: { pitch },
+                set: { ctrl.setPitch(deck: deck, percent: $0) }
+            ), in: -ctrl.pitchRange...ctrl.pitchRange)
+            .tint(accent)
+        }
+        .padding(.horizontal, 10)
+        .padding(.top, 4)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -865,7 +1225,7 @@ private struct DeckPanel: View {
                 Text("DECK \(deck == 1 ? "A" : "B")")
                     .font(.system(size: 10, weight: .bold)).tracking(1.2).foregroundColor(.secondary)
                 Spacer()
-                Text(playing ? "EN MARCHA" : (track != nil ? "PARADO" : "SIN PISTA"))
+                Text(playing ? "PLAY" : (track != nil ? "STOP" : "SIN PISTA"))
                     .font(.system(size: 9, weight: .bold)).tracking(0.5)
                     .foregroundColor(playing ? accent : .secondary)
             }
@@ -878,6 +1238,8 @@ private struct DeckPanel: View {
                          peaksMid: track?.peaksMid ?? [],
                          peaksHigh: track?.peaksHigh ?? [],
                          pos: pos, cues: track?.cues ?? [],
+                         loopIn: track?.loopIn,
+                         loopOut: track?.loopOut,
                          duration: track?.duration ?? 0, accent: accent) { f in
                 ctrl.seek(deck: deck, fraction: f)
             }
@@ -939,6 +1301,8 @@ private struct DeckPanel: View {
             }
             .padding(.horizontal, 10).padding(.top, 8)
 
+            pitchRow
+
             // Jog + Cues
             HStack(spacing: 14) {
                 JogWheel(accent: accent, playing: playing) { delta in
@@ -953,6 +1317,19 @@ private struct DeckPanel: View {
                             else { ctrl.setCue(deck: deck) }
                         } onDelete: {
                             if let c = cue { ctrl.deleteCue(deck: deck, seconds: c) }
+                        }
+                    }
+                    HStack(spacing: 4) {
+                        Button("IN") { ctrl.setLoopIn(deck: deck) }
+                            .buttonStyle(MiniBtn())
+                            .help("Loop in en la posicion actual")
+                        Button("OUT") { ctrl.setLoopOut(deck: deck) }
+                            .buttonStyle(MiniBtn())
+                            .help("Loop out en la posicion actual")
+                        if track?.loopIn != nil || track?.loopOut != nil {
+                            Button("X") { ctrl.clearLoop(deck: deck) }
+                                .buttonStyle(MiniBtn())
+                                .help("Quitar loop")
                         }
                     }
                 }
@@ -1012,6 +1389,8 @@ private struct WaveformView: View {
     var peaksHigh: [Float] = []
     let pos: Double
     let cues: [Double]
+    var loopIn: Double? = nil
+    var loopOut: Double? = nil
     let duration: Double
     let accent: Color
     let onSeek: (Double) -> Void
@@ -1030,7 +1409,7 @@ private struct WaveformView: View {
                              with: .color(Color.white.opacity(0.04)))
                     return
                 }
-                let cols = max(1, Int(size.width))
+                let cols = max(1, Int(size.width / 0.50))
                 let bw = size.width / CGFloat(cols)
                 let playX = CGFloat(pos) * size.width
                 let midY = size.height / 2
@@ -1040,6 +1419,17 @@ private struct WaveformView: View {
                          with: .color(Color.black))
                 ctx.fill(Path(CGRect(x: 0, y: midY - 0.4, width: size.width, height: 0.8)),
                          with: .color(Color.white.opacity(0.10)))
+
+                if let inn = loopIn, let out = loopOut, duration > 0, inn < out {
+                    let x1 = CGFloat(inn / duration) * size.width
+                    let x2 = CGFloat(out / duration) * size.width
+                    ctx.fill(Path(CGRect(x: x1, y: 0, width: max(1, x2 - x1), height: size.height)),
+                             with: .color(Color.green.opacity(0.16)))
+                    ctx.fill(Path(CGRect(x: x1, y: 0, width: 1.5, height: size.height)),
+                             with: .color(Color.green.opacity(0.80)))
+                    ctx.fill(Path(CGRect(x: x2 - 1.5, y: 0, width: 1.5, height: size.height)),
+                             with: .color(Color.green.opacity(0.80)))
+                }
 
                 for j in 0..<cols {
                     let s = Int((Double(j) / Double(cols)) * Double(n))
@@ -1081,12 +1471,16 @@ private struct WaveformView: View {
 
                 for c in cues where duration > 0 {
                     let cx = CGFloat(c / duration) * size.width
+                    var line = Path()
+                    line.move(to: CGPoint(x: cx, y: 0))
+                    line.addLine(to: CGPoint(x: cx, y: size.height))
+                    ctx.stroke(line, with: .color(Color.orange.opacity(0.90)), lineWidth: 1.5)
                     var t = Path()
                     t.move(to: CGPoint(x: cx, y: 0))
                     t.addLine(to: CGPoint(x: cx - 5, y: 9))
                     t.addLine(to: CGPoint(x: cx + 5, y: 9))
                     t.closeSubpath()
-                    ctx.fill(t, with: .color(.yellow))
+                    ctx.fill(t, with: .color(.orange))
                 }
             }
             .transaction { $0.animation = nil }
@@ -1106,7 +1500,7 @@ private struct WaveformView: View {
             Layer(h: CGFloat(high) * maxH, r: 0.10, g: 0.55, b: 1.00),
         ]
         layers.sort { $0.h < $1.h }
-        let barW = max(0.7, bw - 0.35)
+        let barW = max(0.32, bw - 0.12)
         var prev: CGFloat = 0
         for i in 0..<layers.count {
             let h = layers[i].h
@@ -1221,7 +1615,7 @@ private struct NetworkRow: View {
                 .font(.system(size: 9, weight: .bold)).tracking(0.8).foregroundColor(.secondary)
             NetBtn(label: "Denon SC6000", sub: "StageLinq · 2 decks",
                    on: ctrl.denonRunning, color: Color(red:0.95,green:0.65,blue:0.1)) { ctrl.toggleDenon() }
-            NetBtn(label: "Pioneer CDJ-3000", sub: "Pro DJ Link · solo con pista en A",
+            NetBtn(label: "Pioneer CDJ-3000", sub: "Pro DJ Link",
                    on: ctrl.pioneerRunning, color: Color(red:0.25,green:0.6,blue:1)) { ctrl.togglePioneer() }
             Spacer()
             Text("Abre STAGE CONNECT en el mismo Mac")

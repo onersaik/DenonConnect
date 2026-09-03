@@ -8,7 +8,7 @@ import StageLinqKit
 // MARK: - Modelo normalizado
 
 struct DeckDisplay: Identifiable {
-    enum Source { case denon, pioneer }
+    enum Source { case denon, pioneer, serato, virtualdj }
 
     let id: String
     let source: Source
@@ -36,16 +36,29 @@ struct DeckDisplay: Identifiable {
     let cuePositionFraction: Double?    // 0…1 cue activo; nil = sin cue
     let loopInFraction: Double?         // 0…1
     let loopOutFraction: Double?        // 0…1
+    var extraCueFractions: [Double] = []
     var peaks: [UInt8] = []             // waveform real (TEST); vacío = procedural
     var peaksLow: [UInt8] = []
     var peaksMid: [UInt8] = []
     var peaksHigh: [UInt8] = []
     var ltcTimecode: String? = nil       // TC timecode para mostrar (SMPTE / deck LTC)
     var artworkImage: NSImage? = nil
+    /// Clave UserDefaults de la etiqueta (token+layer, IP+player, TEST, software).
+    var labelKey: String = ""
     /// Último paquete del reproductor (jog, play, fader, StateMap…).
     var signalAt: Date = .distantPast
     /// Huella de controles discretos (play, cue, loop, fader, pitch…). Cambia → flash LED.
     var controlStamp: Int = 0
+    /// BPM del disco sin pitch. 0 = no hay dato separado.
+    var trackBPM: Double = 0
+    /// Pioneer: pitch del fader (0x98). nil = no llegó.
+    var faderPitchPercent: Double? = nil
+    var playerSlot: String = ""
+
+    var playbackRate: Double? {
+        guard let pitchPercent, pitchPercent.isFinite else { return nil }
+        return 1.0 + pitchPercent / 100.0
+    }
 
     var trackSeed: Int {
         if !title.isEmpty {
@@ -58,13 +71,36 @@ struct DeckDisplay: Identifiable {
         return abs(h)
     }
 
-    var kindLabel: String { source == .denon ? "DECK" : "PLAYER" }
+    var kindLabel: String {
+        switch source {
+        case .denon: return "DECK"
+        case .pioneer: return "PLAYER"
+        case .serato: return "SERATO"
+        case .virtualdj: return "VDJ"
+        }
+    }
 
-    /// Identificador corto para la tira izquierda (A/B o número de player).
+    var sourceBrand: String {
+        switch source {
+        case .denon: return "Denon"
+        case .pioneer: return "Pioneer"
+        case .serato: return "Serato"
+        case .virtualdj: return "VDJ"
+        }
+    }
+
+    /// Identificador corto para la tira izquierda (A/B, DECK 3/4 o player).
     var deckTag: String {
-        let last = label.split(separator: " ").last.map(String.init) ?? ""
+        let parts = label.split(separator: " ").map(String.init)
+        if let num = parts.reversed().first(where: { Int($0) != nil }) {
+            return num
+        }
+        let last = parts.last ?? ""
         if last.count <= 2 { return last.uppercased() }
-        return source == .pioneer ? "1" : "A"
+        switch source {
+        case .pioneer, .serato, .virtualdj: return "1"
+        case .denon: return "A"
+        }
     }
 }
 
@@ -76,18 +112,28 @@ struct PlayerDeckRow: View {
     var isHero: Bool = false
     var isLTCSource: Bool = false
     var isMasterFocus: Bool = false
+    var isLocked: Bool = false
     var isHot: Bool = false
     var ltcAutoFollow: Bool = true
     var onSelectLTC: () -> Void = {}
     var onPinMaster: () -> Void = {}
+    var onToggleLock: () -> Void = {}
 
     @EnvironmentObject private var artwork: ArtworkFetcher
+    @EnvironmentObject private var labels: DeckLabelStore
+    @Environment(\.waveformWindowSeconds) private var waveformWindowSeconds
+    @State private var editingTag = false
+    @State private var tagDraft = ""
 
     var body: some View {
         Group {
             if isLarge { largeBody } else { smallBody }
         }
         .transaction { $0.animation = nil }
+        .onAppear { requestArtwork() }
+        .onChange(of: deck.title) { _ in requestArtwork() }
+        .onChange(of: deck.artist) { _ in requestArtwork() }
+        .onChange(of: deck.loaded) { _ in requestArtwork() }
     }
 
     // ═══════════════════════════════════════
@@ -113,10 +159,11 @@ struct PlayerDeckRow: View {
                     peaksMid: deck.peaksMid,
                     peaksHigh: deck.peaksHigh,
                     cuePositionFraction: deck.cuePositionFraction,
+                    extraCueFractions: deck.extraCueFractions,
                     loopInFraction:  deck.loopInFraction,
                     loopOutFraction: deck.loopOutFraction,
                     mode: .scrolling,
-                    windowSeconds: isHero ? 10 : 12
+                    windowSeconds: waveformWindowSeconds
                 )
                 .id(deck.id)
                 .frame(height: isHero ? 148 : 96)
@@ -135,6 +182,7 @@ struct PlayerDeckRow: View {
         .overlay(alignment: .bottom) {
             Rectangle().fill(Theme.rowDivider).frame(height: 1)
         }
+        .contextMenu { tagContextMenu }
     }
 
     private var deckIndexStrip: some View {
@@ -144,21 +192,13 @@ struct PlayerDeckRow: View {
                 .tracking(1.1)
                 .foregroundColor(Theme.textTertiary)
 
-            Text(deck.deckTag)
-                .font(.system(size: 20, weight: .bold, design: .monospaced))
-                .foregroundColor(Theme.textPrimary)
-                .frame(width: 34, height: 26)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 2)
-                        .stroke(deck.isPlaying ? deck.accent : Theme.rowDivider, lineWidth: 1)
-                )
+            tagButton(size: 20, width: 34, height: 26)
 
-            Image(systemName: deck.isPlaying ? "play.fill" : "pause.fill")
-                .font(.system(size: 8))
-                .foregroundColor(deck.isPlaying ? Theme.ledGreen : Theme.textTertiary)
+            playStateBadge(compact: false)
 
             DeckSignalLED(signalAt: deck.signalAt, stamp: deck.controlStamp)
 
+            if isLocked { LEDTag(text: "LOCK", color: Theme.yellow) }
             if isMasterFocus || deck.isMaster { LEDTag(text: "MST", color: Theme.accent) }
             if deck.isOnAir  { LEDTag(text: "AIR", color: Theme.red) }
             if deck.isSynced { LEDTag(text: "SYNC", color: Theme.cyan) }
@@ -177,7 +217,7 @@ struct PlayerDeckRow: View {
 
     private var largeMetaRow: some View {
         HStack(alignment: .center, spacing: 12) {
-            artworkThumb(size: isHero ? 52 : 40)
+            if showsArtwork { artworkThumb(size: isHero ? 52 : 40) }
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(titleText)
@@ -204,10 +244,6 @@ struct PlayerDeckRow: View {
                             .foregroundColor(Theme.cyan)
                             .lineLimit(1)
                     }
-                    Text(deck.stateLabel.uppercased())
-                        .font(.system(size: 9, weight: .semibold))
-                        .tracking(0.6)
-                        .foregroundColor(Theme.textTertiary)
                     Text(deck.label.uppercased())
                         .font(.system(size: 8, weight: .medium))
                         .tracking(0.4)
@@ -216,7 +252,9 @@ struct PlayerDeckRow: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .onAppear { artwork.fetch(artist: deck.artist, title: deck.title) }
+            .onAppear { requestArtwork() }
+            .onChange(of: deck.title) { _ in requestArtwork() }
+            .onChange(of: deck.artist) { _ in requestArtwork() }
 
             ledTimeDisplay
 
@@ -225,8 +263,13 @@ struct PlayerDeckRow: View {
             VStack(alignment: .trailing, spacing: 1) {
                 if let pitch = deck.pitchPercent, abs(pitch) > 0.01 {
                     Text(String(format: "%+.2f%%", pitch))
-                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
                         .foregroundColor(Theme.cyan)
+                }
+                if let rate = deck.playbackRate, abs((rate - 1) * 100) > 0.01 {
+                    Text(String(format: "%.3f×", rate))
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .foregroundColor(Theme.textSecondary)
                 }
                 HStack(alignment: .lastTextBaseline, spacing: 4) {
                     Text(bpmText)
@@ -237,6 +280,12 @@ struct PlayerDeckRow: View {
                         .foregroundColor(Theme.textTertiary)
                         .padding(.bottom, 4)
                 }
+                if deck.trackBPM > 0, let pitch = deck.pitchPercent, abs(pitch) > 0.01,
+                   abs(deck.trackBPM - deck.bpm) > 0.04 {
+                    Text(String(format: "disco %.2f", deck.trackBPM))
+                        .font(.system(size: 8, design: .monospaced))
+                        .foregroundColor(Theme.textTertiary)
+                }
             }
         }
         .padding(.horizontal, 10)
@@ -246,6 +295,7 @@ struct PlayerDeckRow: View {
 
     private var hasExtendedMeta: Bool {
         !deck.album.isEmpty || !deck.genre.isEmpty || !deck.key.isEmpty || !deck.comment.isEmpty
+            || deck.faderPitchPercent != nil || !deck.playerSlot.isEmpty
     }
 
     private var largeDetailRow: some View {
@@ -258,6 +308,12 @@ struct PlayerDeckRow: View {
             }
             if !deck.key.isEmpty {
                 metaChip(label: "NOTA", value: deck.key)
+            }
+            if !deck.playerSlot.isEmpty {
+                metaChip(label: "SLOT", value: deck.playerSlot)
+            }
+            if let fader = deck.faderPitchPercent, abs(fader) > 0.01 {
+                metaChip(label: "FADER", value: String(format: "%+.2f%%", fader))
             }
             if !deck.comment.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
@@ -293,27 +349,128 @@ struct PlayerDeckRow: View {
         }
     }
 
+    private var resolvedLabelKey: String {
+        deck.labelKey.isEmpty ? deck.id : deck.labelKey
+    }
+
+    private var displayedTag: String {
+        labels.tag(for: resolvedLabelKey) ?? deck.deckTag
+    }
+
+    private func tagButton(size: CGFloat, width: CGFloat, height: CGFloat) -> some View {
+        Button {
+            tagDraft = displayedTag
+            editingTag = true
+        } label: {
+            Text(displayedTag)
+                .font(.system(size: displayedTag.count > 3 ? size * 0.62 : size, weight: .bold, design: .monospaced))
+                .foregroundColor(Theme.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.45)
+                .frame(width: width, height: height)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 2)
+                        .stroke(deck.isPlaying ? deck.accent : Theme.rowDivider, lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+        .help("Clic para cambiar letra, número o nombre de este deck")
+        .popover(isPresented: $editingTag, arrowEdge: .trailing) {
+            tagEditor
+        }
+    }
+
+    private var tagEditor: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("ETIQUETA DEL DECK")
+                .font(.system(size: 10, weight: .bold))
+                .tracking(0.8)
+                .foregroundColor(Theme.textTertiary)
+            TextField("A, 1, MAIN…", text: $tagDraft)
+                .textFieldStyle(.plain)
+                .font(.system(size: 16, weight: .bold, design: .monospaced))
+                .padding(8)
+                .background(Color.black)
+                .overlay(Rectangle().stroke(Theme.rowDivider, lineWidth: 1))
+                .onSubmit { commitTag() }
+            HStack(spacing: 4) {
+                ForEach(["A", "B", "C", "D", "1", "2", "3", "4", "5", "6", "7", "8"], id: \.self) { chip in
+                    Button(chip) {
+                        tagDraft = chip
+                        commitTag()
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundColor(Theme.textPrimary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 4)
+                    .background(Color.white.opacity(0.08))
+                }
+            }
+            HStack {
+                Button("MAIN") { tagDraft = "MAIN"; commitTag() }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(Theme.accent)
+                Spacer()
+                Button("Restablecer") {
+                    labels.clear(resolvedLabelKey)
+                    editingTag = false
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11))
+                .foregroundColor(Theme.textSecondary)
+                Button("Guardar") { commitTag() }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(Theme.ledGreen)
+            }
+        }
+        .padding(14)
+        .frame(width: 320)
+        .background(Theme.panel)
+    }
+
+    private func commitTag() {
+        labels.setTag(tagDraft, for: resolvedLabelKey)
+        editingTag = false
+    }
+
+    @ViewBuilder
+    private var tagContextMenu: some View {
+        Button("Renombrar deck…") {
+            tagDraft = displayedTag
+            editingTag = true
+        }
+        Button("Restablecer etiqueta") { labels.clear(resolvedLabelKey) }
+    }
+
+    private func requestArtwork() {
+        if let img = deck.artworkImage {
+            artwork.seed(artist: deck.artist, title: deck.title, image: img)
+            return
+        }
+        artwork.fetch(artist: deck.artist, title: deck.title)
+    }
+
+    private var resolvedArtwork: NSImage? {
+        deck.artworkImage ?? artwork.artwork(artist: deck.artist, title: deck.title)
+    }
+
+    /// Solo si hay píxeles. Sin datos no se reserva hueco (Denon real / iTunes vacío).
+    private var showsArtwork: Bool { resolvedArtwork != nil }
+
     private func artworkThumb(size: CGFloat) -> some View {
-        let img = artwork.artwork(artist: deck.artist, title: deck.title) ?? deck.artworkImage
-        return Group {
-            if let img {
+        Group {
+            if let img = resolvedArtwork {
                 Image(nsImage: img)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
                     .frame(width: size, height: size)
                     .clipped()
-            } else {
-                Rectangle()
-                    .fill(Color.white.opacity(0.06))
-                    .frame(width: size, height: size)
-                    .overlay(
-                        Image(systemName: "music.note")
-                            .font(.system(size: size * 0.32))
-                            .foregroundColor(Theme.textTertiary)
-                    )
+                    .overlay(Rectangle().stroke(Theme.rowDivider, lineWidth: 1))
             }
         }
-        .overlay(Rectangle().stroke(Theme.rowDivider, lineWidth: 1))
     }
     private var ledTimeDisplay: some View {
         VStack(alignment: .center, spacing: 2) {
@@ -421,7 +578,7 @@ struct PlayerDeckRow: View {
                 .font(.system(size: 10, weight: .medium, design: .monospaced))
                 .foregroundColor(Theme.textTertiary)
 
-            Spacer()
+            Spacer(minLength: 8)
 
             if let progress = deck.progress {
                 GeometryReader { geo in
@@ -440,8 +597,11 @@ struct PlayerDeckRow: View {
                     .frame(width: 28, alignment: .trailing)
             }
 
-            masterButton
-            ltcButton
+            HStack(spacing: 6) {
+                lockButton
+                masterButton
+                ltcButton
+            }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
@@ -457,12 +617,12 @@ struct PlayerDeckRow: View {
             HStack(spacing: 0) {
                 // Deck tag strip
                 VStack(spacing: 2) {
-                    Text(deck.deckTag)
-                        .font(.system(size: 13, weight: .bold, design: .monospaced))
-                        .foregroundColor(Theme.textPrimary)
-                    Image(systemName: deck.isPlaying ? "play.fill" : "pause.fill")
-                        .font(.system(size: 7))
-                        .foregroundColor(deck.isPlaying ? Theme.ledGreen : Theme.textTertiary)
+                    Text(deck.kindLabel)
+                        .font(.system(size: 6, weight: .bold))
+                        .tracking(0.4)
+                        .foregroundColor(Theme.textTertiary)
+                    tagButton(size: 13, width: 28, height: 20)
+                    playStateBadge(compact: true)
                     DeckSignalLED(signalAt: deck.signalAt, stamp: deck.controlStamp, compact: true)
                 }
                 .frame(width: 32)
@@ -494,14 +654,20 @@ struct PlayerDeckRow: View {
                     .foregroundColor(deck.loaded ? Theme.ledGreen : Theme.ledDim)
                     .padding(.trailing, 8)
 
-                // BPM
+                // BPM + pitch
                 VStack(alignment: .trailing, spacing: 0) {
                     Text(bpmText)
                         .font(.system(size: 16, weight: .bold, design: .monospaced))
                         .foregroundColor(deck.bpm > 0 ? Theme.ledGreen : Theme.ledDim)
-                    Text("BPM")
-                        .font(.system(size: 6, weight: .bold))
-                        .foregroundColor(Theme.textTertiary)
+                    if let pitch = deck.pitchPercent, abs(pitch) > 0.01 {
+                        Text(String(format: "%+.2f%%", pitch))
+                            .font(.system(size: 8, weight: .bold, design: .monospaced))
+                            .foregroundColor(Theme.cyan)
+                    } else {
+                        Text("BPM")
+                            .font(.system(size: 6, weight: .bold))
+                            .foregroundColor(Theme.textTertiary)
+                    }
                 }
                 .padding(.trailing, 8)
 
@@ -514,6 +680,7 @@ struct PlayerDeckRow: View {
                         .font(.system(size: 10, weight: .bold, design: .monospaced))
                         .foregroundColor(deck.key.isEmpty ? Theme.textTertiary : Theme.purple)
                     if isLTCSource { LEDTag(text: "LTC", color: Theme.purple) }
+                    lockButton
                     masterButton
                     ltcButton
                 }
@@ -536,12 +703,13 @@ struct PlayerDeckRow: View {
                 peaksMid:            deck.peaksMid,
                 peaksHigh:           deck.peaksHigh,
                 cuePositionFraction: deck.cuePositionFraction,
+                extraCueFractions:   deck.extraCueFractions,
                 loopInFraction:      deck.loopInFraction,
                 loopOutFraction:     deck.loopOutFraction,
                 mode:                .overview
             )
             .id(deck.id + "-ov")
-            .frame(height: 52)
+            .frame(height: 68)
             .opacity(deck.loaded && (deck.progress != nil || !deck.peaks.isEmpty) ? 1 : 0.22)
             .transaction { $0.animation = nil }
         }
@@ -554,11 +722,53 @@ struct PlayerDeckRow: View {
         .overlay(alignment: .bottom) {
             Rectangle().fill(Theme.rowDivider).frame(height: 1)
         }
+        .contextMenu { tagContextMenu }
     }
 
     // ═══════════════════════════════════════
     // MARK: Componentes compartidos
     // ═══════════════════════════════════════
+
+    private func playStateBadge(compact: Bool) -> some View {
+        let playing = deck.isPlaying
+        let paused = deck.loaded && !playing
+        let label = playing ? "PLAY" : (paused ? "PAUSA" : "STOP")
+        let color = playing ? Theme.ledGreen : (paused ? Theme.yellow : Theme.textTertiary)
+        return VStack(spacing: compact ? 1 : 2) {
+            Circle()
+                .fill(color)
+                .frame(width: compact ? 6 : 8, height: compact ? 6 : 8)
+                .shadow(color: playing ? color.opacity(0.95) : .clear, radius: compact ? 2 : 3.5)
+            Text(label)
+                .font(.system(size: compact ? 6 : 7, weight: .bold))
+                .tracking(0.3)
+                .foregroundColor(color)
+        }
+        .help(playing ? "Reproduciendo" : (paused ? "En pausa" : "Parado"))
+    }
+
+    private var lockButton: some View {
+        Button(action: onToggleLock) {
+            HStack(spacing: 3) {
+                Image(systemName: isLocked ? "lock.fill" : "lock.open")
+                    .font(.system(size: 7))
+                Text("LOCK")
+                    .font(.system(size: 8, weight: .bold))
+                    .tracking(0.3)
+            }
+            .foregroundColor(isLocked ? .black : Theme.textTertiary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(
+                Rectangle()
+                    .fill(isLocked ? Theme.yellow : Color.white.opacity(0.08))
+            )
+        }
+        .buttonStyle(.plain)
+        .help(isLocked
+              ? "Salida de este deck anclada. El MASTER de casa no la pisa ni cambia su generador."
+              : "Anclar el LTC de esta fila. El MASTER sigue a otro deck en la salida de casa.")
+    }
 
     private var ltcButton: some View {
         Button(action: onSelectLTC) {

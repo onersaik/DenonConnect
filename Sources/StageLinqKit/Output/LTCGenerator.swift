@@ -261,13 +261,13 @@ public final class LTCGenerator {
         samplesIntoHalfBit = 0
         stateLock.unlock()
 
-        engine.mainMixerNode.outputVolume = 0
         if let node = sourceNode {
+            engine.mainMixerNode.outputVolume = 0
             engine.disconnectNodeOutput(node)
             engine.detach(node)
             sourceNode = nil
         }
-        engine.stop()
+        if engine.isRunning { engine.stop() }
         engine.reset()
         if wasRunning { log("SMPTE LTC [\(name)] detenido") }
     }
@@ -413,5 +413,89 @@ public final class LTCGenerator {
         let sync: [UInt8] = [0,0,1,1,1,1,1,1,1,1,1,1,1,1,0,1]
         for (i, b) in sync.enumerated() { bits[64 + i] = b }
         return bits
+    }
+}
+
+// MARK: - Fan-out: un LTC → N dispositivos
+
+/// Un único playhead/pause/seek alimenta N `LTCGenerator` (un engine por salida).
+/// El mismo bitstream en dos devices es correcto. Apagar = stop de todos.
+public final class LTCFanout {
+
+    public let name: String
+    public var frameRate: LTCGenerator.FrameRate = .fps25
+    public var level: Float = 0.5
+
+    private var gens: [LTCGenerator] = []
+    private let log: (String) -> Void
+
+    public init(name: String, log: @escaping (String) -> Void = { _ in }) {
+        self.name = name
+        self.log = log
+    }
+
+    deinit { stop() }
+
+    public var isRunning: Bool {
+        gens.contains { $0.isRunning }
+    }
+
+    public var outputCount: Int { gens.count }
+
+    public func start(deviceIDs: [AudioDeviceID], playhead: Double?, playing: Bool) throws {
+        stop()
+        let unique = Self.uniqueIDs(deviceIDs)
+        var started: [LTCGenerator] = []
+        do {
+            for (i, id) in unique.enumerated() {
+                let label = unique.count > 1 ? "\(name)#\(i + 1)" : name
+                let gen = LTCGenerator(name: label, log: log)
+                gen.frameRate = frameRate
+                gen.level = level
+                gen.outputDeviceID = id == 0 ? nil : id
+                if let playhead, playhead.isFinite, playhead >= 0 {
+                    gen.applyPlayhead(seconds: playhead, playing: false)
+                }
+                try gen.start()
+                if let playhead, playhead.isFinite, playhead >= 0 {
+                    gen.applyPlayhead(seconds: playhead, playing: playing)
+                }
+                started.append(gen)
+            }
+            gens = started
+            if unique.count > 1 {
+                log("SMPTE LTC [\(name)] × \(unique.count) salidas")
+            }
+        } catch {
+            started.forEach { $0.stop() }
+            throw error
+        }
+    }
+
+    public func stop() {
+        gens.forEach {
+            $0.setPaused(true)
+            $0.stop()
+        }
+        gens.removeAll()
+    }
+
+    public func applyPlayhead(seconds: Double, playing: Bool) {
+        for gen in gens {
+            gen.applyPlayhead(seconds: seconds, playing: playing)
+        }
+    }
+
+    public func setPaused(_ value: Bool) {
+        gens.forEach { $0.setPaused(value) }
+    }
+
+    public static func uniqueIDs(_ ids: [AudioDeviceID]) -> [AudioDeviceID] {
+        var seen = Set<AudioDeviceID>()
+        var out: [AudioDeviceID] = []
+        for id in ids where seen.insert(id).inserted {
+            out.append(id)
+        }
+        return out.isEmpty ? [0] : out
     }
 }

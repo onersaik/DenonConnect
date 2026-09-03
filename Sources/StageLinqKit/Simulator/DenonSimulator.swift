@@ -25,13 +25,17 @@ public struct SimDeckState: Sendable {
     public var duration: Double          // duración total en segundos
     public var isMaster: Bool
     public var key: String
+    public var pitchPercent: Double
+    public var isSync: Bool
 
     public init(title: String = "", artist: String = "", bpm: Double = 0,
                 isPlaying: Bool = false, positionSeconds: Double = 0,
-                duration: Double = 0, isMaster: Bool = false, key: String = "") {
+                duration: Double = 0, isMaster: Bool = false, key: String = "",
+                pitchPercent: Double = 0, isSync: Bool = false) {
         self.title = title; self.artist = artist; self.bpm = bpm
         self.isPlaying = isPlaying; self.positionSeconds = positionSeconds
         self.duration = duration; self.isMaster = isMaster; self.key = key
+        self.pitchPercent = pitchPercent; self.isSync = isSync
     }
 }
 
@@ -41,8 +45,12 @@ public final class DenonSimulator {
     public static let beatInfoPort: UInt16 = 51340
 
     /// Token propio, distinto del que usa el cliente, para que la app no
-    /// confunda este anuncio con el suyo.
-    private let token: [UInt8] = [11, 22, 33, 44, 55, 66, 77, 88, 99, 110, 121, 132, 143, 154, 165, 176]
+    /// confunda este anuncio con el suyo. ContentView filtra el SIM por este
+    /// token o por el nombre (SC6000-SIM), nunca un SC6000 real.
+    public static let announcementToken: [UInt8] = [
+        11, 22, 33, 44, 55, 66, 77, 88, 99, 110, 121, 132, 143, 154, 165, 176,
+    ]
+    private var token: [UInt8] { Self.announcementToken }
 
 
     /// Proveedor de estado externo. Si está configurado, snapshot() lo usa en lugar del
@@ -97,7 +105,7 @@ public final class DenonSimulator {
         queue.async { [weak self] in self?.runStateMapListener() }
         queue.async { [weak self] in self?.runBeatInfoListener() }
         queue.async { [weak self] in self?.runClock() }
-        log("[Denon] Simulador Denon iniciado como «\(deviceName)»")
+        log("[Denon] Activo como «\(deviceName)»")
     }
 
     public func stop() {
@@ -117,7 +125,7 @@ public final class DenonSimulator {
         mainListener?.close()
         stateListener?.close()
         beatInfoListenerClose()
-        log("[Denon] Simulador detenido")
+        log("[Denon] Detenido")
     }
 
     private func beatInfoListenerClose() {
@@ -179,7 +187,7 @@ public final class DenonSimulator {
 
     private func runAnnounce() {
         guard let sock = try? UDPSocket(listenPort: nil) else {
-            log("[AVISO] Simulador: no se pudo crear el socket de anuncio")
+            log("[AVISO] Denon: no se pudo crear el socket de anuncio")
             return
         }
         announceSocket = sock
@@ -204,7 +212,7 @@ public final class DenonSimulator {
 
     private func runMainListener() {
         guard let listener = try? TCPListener(port: DenonSimulator.mainPort) else {
-            log("[AVISO] Simulador: puerto \(DenonSimulator.mainPort) ocupado")
+            log("[AVISO] Denon: puerto \(DenonSimulator.mainPort) ocupado")
             return
         }
         mainListener = listener
@@ -253,7 +261,7 @@ public final class DenonSimulator {
 
     private func runStateMapListener() {
         guard let listener = try? TCPListener(port: DenonSimulator.stateMapPort) else {
-            log("[AVISO] Simulador: puerto \(DenonSimulator.stateMapPort) ocupado")
+            log("[AVISO] Denon: puerto \(DenonSimulator.stateMapPort) ocupado")
             return
         }
         stateListener = listener
@@ -377,7 +385,7 @@ public final class DenonSimulator {
 
     private func runBeatInfoListener() {
         guard let listener = try? TCPListener(port: DenonSimulator.beatInfoPort) else {
-            log("[AVISO] Simulador: puerto \(DenonSimulator.beatInfoPort) ocupado")
+            log("[AVISO] Denon: puerto \(DenonSimulator.beatInfoPort) ocupado")
             return
         }
         beatListener = listener

@@ -99,4 +99,21 @@ public final class StageLinqDevice: ObservableObject, Identifiable {
         self.ip = info.address
         self.port = info.port
     }
+
+    /// Solo el simulador STAGE CONNECT TEST (token o nombre exacto).
+    /// `contains("SIM")` marcaría un SC6000 real (p. ej. "SIMON") como TEST:
+    /// se saltaría el HOWDY unicast y `entries()` lo ocultaría.
+    public var isDenonSimulator: Bool {
+        if token == DenonSimulator.announcementToken { return true }
+        return Self.isDenonSimulatorName(name)
+    }
+
+    public static func isDenonSimulatorName(_ raw: String) -> Bool {
+        let u = raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if u.isEmpty { return false }
+        if u == "SC6000-SIM" || u == "SC6000 TEST" || u == "SC6000TEST" { return true }
+        if u.hasPrefix("SC6000-SIM") { return true }
+        if u.hasPrefix("STAGE CONNECT TEST") { return true }
+        return false
+    }
 }

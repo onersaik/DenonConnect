@@ -61,13 +61,25 @@ public enum DJLink {
         return pitchHit && bpmHit && (idHit || lengthHit)
     }
 
-    /// Tipos de paquete (byte 0x0a).
+    /// Tipos de paquete (byte 0x0a). En el puerto 50000 el mismo byte es el
+    /// ciclo de vida (dysentery / alphatheta-connect / flesniak). En 50002,
+    /// 0x0a es estado de CDJ.
     public enum PacketType {
-        public static let keepAlive: UInt8 = 0x06   // presencia periódica
-        public static let hello: UInt8 = 0x0a       // anuncio inicial / estado CDJ (según puerto)
-        public static let cdjStatus: UInt8 = 0x0a   // en puerto 50002
+        public static let claimStage1: UInt8 = 0x00  // claim 1: 0x24 es contador, NO player
+        public static let mixerAssignIntent: UInt8 = 0x01
+        public static let claimStage2: UInt8 = 0x02  // claim 2: player D en 0x2e
+        public static let mixerChannelAssign: UInt8 = 0x03
+        public static let claimStage3: UInt8 = 0x04  // claim 3: player D en 0x24
+        public static let mixerAssignDone: UInt8 = 0x05
+        public static let keepAlive: UInt8 = 0x06    // presencia periódica; player en 0x24
+        public static let channelConflict: UInt8 = 0x08
+        public static let hello: UInt8 = 0x0a        // anuncio inicial (50000); sin player
+        public static let cdjStatus: UInt8 = 0x0a    // estado CDJ (50002)
         public static let mixerStatus: UInt8 = 0x29
     }
+
+    /// DJM / sección mixer de XDJ-XZ / Opus Quad usa device number ≥ 0x21 (33).
+    public static let mixerPlayerNumberMin = 0x21
 
     /// Offsets comunes de cabecera.
     public enum Header {
@@ -80,24 +92,171 @@ public enum DJLink {
 
 // MARK: - Paquete de presencia (puerto 50000)
 
+/// CDJ/XDJ (1–6) frente a DJM / mixer embebido (≥33 o nombre DJM).
+public enum DJLinkDeviceKind: Equatable {
+    case player
+    case mixer
+    case other
+
+    public static func infer(model: String, playerNumber: Int) -> DJLinkDeviceKind {
+        if playerNumber >= DJLink.mixerPlayerNumberMin { return .mixer }
+        let u = model.uppercased()
+        if u.contains("DJM") { return .mixer }
+        if (1...6).contains(playerNumber) { return .player }
+        return .other
+    }
+}
+
 /// Anuncio de presencia de un dispositivo Pro DJ Link en la red.
 public struct DJLinkKeepAlive {
     public var playerNumber: Int
     public var model: String
     public var ip: String
+    public var kind: DJLinkDeviceKind
+    /// Tipo en 0x0a (0x06 keepalive, 0x0a hello, 0x00/0x02/0x04 claim…).
+    public var packetType: UInt8
+    /// Hay player estable (keepalive / claim 2–3). Hello y claim 1 no.
+    public var hasStableIdentity: Bool
 
-    /// Offsets verificados (struct KeepAlivePacket, variante type_status):
-    /// 0x0a tipo · 0x0c-0x1f modelo · 0x24 nº reproductor · 0x2c-0x2f IP.
+    public var isMixer: Bool { kind == .mixer }
+
+    /// Offsets (dysentery startup.html / packets.html, alphatheta-connect
+    /// FULL_STARTUP, flesniak python-prodj-link):
+    /// 0x0a tipo · 0x0c-0x1f modelo · keepalive 0x06: player 0x24, IP 0x2c.
+    /// Hello 0x0a: sin player. Claim 0x00: 0x24 es contador N, no player.
+    /// Claim 0x02: player D en 0x2e. Claim 0x04: player D en 0x24.
+    /// La IP del datagrama (fromIP) manda sobre el campo del paquete.
     public static func parse(_ data: Data) -> DJLinkKeepAlive? {
         let bytes = [UInt8](data)
-        guard bytes.count >= 0x30 else { return nil }
+        guard bytes.count >= 0x20 else { return nil }
         guard Array(bytes[0..<10]) == DJLink.magic else { return nil }
-        guard bytes[DJLink.Header.type] == DJLink.PacketType.keepAlive else { return nil }
+        let type = bytes[DJLink.Header.type]
+        let model = DJLinkCodec.readPaddedString(
+            bytes, at: DJLink.Header.keepAliveModel, length: DJLink.Header.modelLength
+        )
 
-        let model = DJLinkCodec.readPaddedString(bytes, at: DJLink.Header.keepAliveModel, length: DJLink.Header.modelLength)
+        let parsed: (player: Int, ip: String, stable: Bool)?
+        switch type {
+        case DJLink.PacketType.keepAlive:
+            parsed = parsePlayerAt24(bytes, requirePlayer: true)
+        case DJLink.PacketType.claimStage3:
+            // Claim 3 es 0x26 bytes: player D en 0x24, contador en 0x25. Sin IP.
+            guard bytes.count >= 0x26 else { return nil }
+            parsed = parsePlayerAt24(bytes, requirePlayer: false)
+        case DJLink.PacketType.claimStage2:
+            // Claim 2 es 0x32 bytes: IP 0x24, MAC 0x28, player D 0x2e, N 0x2f.
+            guard bytes.count >= 0x32 else { return nil }
+            let player = Int(bytes[0x2e])
+            let ok = (1...6).contains(player) || player >= DJLink.mixerPlayerNumberMin
+            parsed = (player, ipv4(bytes, at: 0x24), ok)
+        case DJLink.PacketType.hello, DJLink.PacketType.claimStage1:
+            // 0x0a hello: solo modelo. 0x00 claim 1: 0x24 es N=1…3, no player.
+            parsed = (0, "", false)
+        default:
+            // Subtipo no listado con layout de keepalive (player 0x24 + IP).
+            if let fallback = parsePlayerAt24(bytes, requirePlayer: false),
+               fallback.stable {
+                parsed = fallback
+            } else {
+                return nil
+            }
+        }
+        guard let parsed else { return nil }
+
+        let kind = DJLinkDeviceKind.infer(model: model, playerNumber: parsed.player)
+        return DJLinkKeepAlive(
+            playerNumber: parsed.player,
+            model: model,
+            ip: parsed.ip,
+            kind: kind,
+            packetType: type,
+            hasStableIdentity: parsed.stable
+        )
+    }
+
+    private static func ipv4(_ bytes: [UInt8], at i: Int) -> String {
+        guard i + 3 < bytes.count else { return "" }
+        return "\(bytes[i]).\(bytes[i + 1]).\(bytes[i + 2]).\(bytes[i + 3])"
+    }
+
+    private static func parsePlayerAt24(
+        _ bytes: [UInt8], requirePlayer: Bool
+    ) -> (player: Int, ip: String, stable: Bool)? {
+        guard bytes.count >= 0x25 else { return nil }
         let player = Int(bytes[0x24])
-        let ip = "\(bytes[0x2c]).\(bytes[0x2d]).\(bytes[0x2e]).\(bytes[0x2f])"
-        return DJLinkKeepAlive(playerNumber: player, model: model, ip: ip)
+        if requirePlayer, player <= 0 { return nil }
+        let stable = (1...6).contains(player) || player >= DJLink.mixerPlayerNumberMin
+        // Keepalive 0x36: IP en 0x2c. Claim 3 (0x26) no trae IP — ipv4 devuelve "".
+        return (player, ipv4(bytes, at: 0x2c), stable)
+    }
+
+    /// Cabecera común de anuncio 50000 (dysentery / flesniak / beat-link).
+    /// 0x21 = plantilla CDJ-3000 (0x03 claim, 0x04 hello) porque el virtual es player 7.
+    private static func writeAnnounceHeader(
+        into b: inout [UInt8],
+        type: UInt8,
+        deviceType: UInt8,
+        packetLength: UInt8,
+        model: String
+    ) {
+        for (i, v) in DJLink.magic.enumerated() { b[i] = v }
+        b[0x0a] = type
+        b[0x0b] = 0x00
+        DJLinkCodec.writePaddedString(model, into: &b, at: DJLink.Header.keepAliveModel, length: DJLink.Header.modelLength)
+        b[0x20] = 0x01
+        b[0x21] = deviceType
+        b[0x22] = 0x00
+        b[0x23] = packetLength
+    }
+
+    private static func claimCounter(_ n: UInt8) -> UInt8 {
+        min(max(n, 1), 3)
+    }
+
+    /// Hello 0x0a (anuncio inicial). Variante CDJ-3000: 0x26 bytes, 0x21=0x04.
+    /// Sin player. 3 veces a ~300 ms (Now Playing / beat-link / CDJ real).
+    public static func buildVirtualHello(model: String) -> Data {
+        var b = [UInt8](repeating: 0, count: 0x26)
+        writeAnnounceHeader(into: &b, type: DJLink.PacketType.hello, deviceType: 0x04, packetLength: 0x26, model: model)
+        b[0x24] = 0x01
+        b[0x25] = 0x40
+        return Data(b)
+    }
+
+    /// Claim 1 tipo 0x00 (0x2c bytes). 0x24 es el contador N=1…3, NUNCA el player.
+    /// 0x25 flags CDJ, 0x26–0x2b MAC. 0x21=0x03 (plantilla CDJ-3000).
+    public static func buildVirtualClaim1(counter: UInt8, model: String, mac: [UInt8]) -> Data {
+        var b = [UInt8](repeating: 0, count: 0x2c)
+        writeAnnounceHeader(into: &b, type: DJLink.PacketType.claimStage1, deviceType: 0x03, packetLength: 0x2c, model: model)
+        b[0x24] = claimCounter(counter)
+        b[0x25] = 0x01
+        for i in 0..<6 { b[0x26 + i] = i < mac.count ? mac[i] : 0 }
+        return Data(b)
+    }
+
+    /// Claim 2 tipo 0x02 (0x32 bytes). Player D en 0x2e, contador N en 0x2f.
+    /// IP 0x24, MAC 0x28, flags 0x30=1, asignación manual 0x31=2 (player 7 fijo).
+    public static func buildVirtualClaim2(
+        counter: UInt8, playerNumber: UInt8, model: String, ip: [UInt8], mac: [UInt8]
+    ) -> Data {
+        var b = [UInt8](repeating: 0, count: 0x32)
+        writeAnnounceHeader(into: &b, type: DJLink.PacketType.claimStage2, deviceType: 0x03, packetLength: 0x32, model: model)
+        for i in 0..<4 { b[0x24 + i] = i < ip.count ? ip[i] : 0 }
+        for i in 0..<6 { b[0x28 + i] = i < mac.count ? mac[i] : 0 }
+        b[0x2e] = playerNumber
+        b[0x2f] = claimCounter(counter)
+        b[0x30] = 0x01
+        b[0x31] = 0x02
+        return Data(b)
+    }
+
+    /// Claim 3 tipo 0x04 (0x26 bytes). Player D en 0x24, contador N en 0x25.
+    public static func buildVirtualClaim3(counter: UInt8, playerNumber: UInt8, model: String) -> Data {
+        var b = [UInt8](repeating: 0, count: 0x26)
+        writeAnnounceHeader(into: &b, type: DJLink.PacketType.claimStage3, deviceType: 0x03, packetLength: 0x26, model: model)
+        b[0x24] = playerNumber
+        b[0x25] = claimCounter(counter)
+        return Data(b)
     }
 
     /// Construye nuestro propio paquete de presencia (54 bytes / 0x36).
@@ -105,14 +264,7 @@ public struct DJLinkKeepAlive {
     /// puerto 50002: si no nos anunciamos, no nos mandan nada.
     public static func buildVirtualCDJ(playerNumber: UInt8, model: String, ip: [UInt8], mac: [UInt8]) -> Data {
         var b = [UInt8](repeating: 0, count: 0x36)
-        for (i, v) in DJLink.magic.enumerated() { b[i] = v }
-        b[0x0a] = DJLink.PacketType.keepAlive
-        b[0x0b] = 0x00
-        DJLinkCodec.writePaddedString(model, into: &b, at: DJLink.Header.keepAliveModel, length: DJLink.Header.modelLength)
-        b[0x20] = 0x01          // constante
-        b[0x21] = 0x02          // device_type: 2 = CDJ
-        b[0x22] = 0x00
-        b[0x23] = 0x36          // subtipo emparejado con type_status
+        writeAnnounceHeader(into: &b, type: DJLink.PacketType.keepAlive, deviceType: 0x02, packetLength: 0x36, model: model)
         b[0x24] = playerNumber
         b[0x25] = 0x01
         for i in 0..<6 { b[0x26 + i] = i < mac.count ? mac[i] : 0 }
@@ -143,7 +295,8 @@ public struct CDJStatus {
     public var slot: Slot
 
     public var trackBPM: Double      // BPM del track sin pitch
-    public var pitchPercent: Double  // ±% del pitch efectivo
+    public var pitchPercent: Double  // ±% del pitch efectivo (0x8c)
+    public var faderPitchPercent: Double // ±% del fader (0x98)
     public var effectiveBPM: Double  // BPM realmente sonando
 
     public var beatCount: Int        // beat absoluto dentro del track
@@ -202,11 +355,11 @@ public struct CDJStatus {
         }
     }
 
-    /// Offsets verificados (struct StatusPacket, variante "cdj"):
+    /// Offsets verificados (Deep Symmetry / python-prodj-link):
     /// 0x21 nº reproductor · 0x29 slot · 0x2a tipo de pista · 0x2c-0x2f ID de
     /// pista · 0x7b modo de reproducción · 0x7c-0x7f firmware · 0x89 flags
-    /// (play/master/sync/on-air) · 0x92-0x93 BPM · 0x98-0x9b pitch efectivo ·
-    /// 0xa0-0xa3 contador de beat · 0xa6 beat dentro del compás.
+    /// (play/master/sync/on-air) · 0x8c-0x8f Pitch1 efectivo (SYNC) ·
+    /// 0x92-0x93 BPM · 0x98-0x9b Pitch2 fader · 0xa0-0xa3 beat · 0xa6 compás.
     public static func parse(_ data: Data) -> CDJStatus? {
         let b = [UInt8](data)
         guard b.count >= 0xa7 else { return nil }
@@ -232,10 +385,14 @@ public struct CDJStatus {
         // 0xffff significa "sin pista analizada".
         let trackBPM = bpmRaw == 0xffff ? 0 : Double(bpmRaw) / 100.0
 
-        let pitchRaw = DJLinkCodec.readUInt32(b, at: 0x98)
-        // 0x100000 = 0% (velocidad normal); 0x000000 = −100%; 0x200000 = +100%.
-        let pitchRatio = Double(pitchRaw) / Double(0x100000)
-        let pitchPercent = (pitchRatio - 1.0) * 100.0
+        // Pitch1 0x8c = tempo efectivo (SYNC / lo que suena). Pitch2 0x98 = fader.
+        // Con SYNC activo el fader no coincide con el BPM de pantalla.
+        let pitch1Raw = DJLinkCodec.readUInt32(b, at: 0x8c)
+        let pitch1Ratio = Double(pitch1Raw) / Double(0x100000)
+        let pitchPercent = (pitch1Ratio - 1.0) * 100.0
+        let pitch2Raw = DJLinkCodec.readUInt32(b, at: 0x98)
+        let pitch2Ratio = Double(pitch2Raw) / Double(0x100000)
+        let faderPitchPercent = (pitch2Ratio - 1.0) * 100.0
 
         let beatCountRaw = DJLinkCodec.readUInt32(b, at: 0xa0)
         let beatCount = beatCountRaw == 0xffffffff ? 0 : Int(beatCountRaw)
@@ -243,7 +400,8 @@ public struct CDJStatus {
 
         let mode = PlayMode(rawValue: playModeRaw) ?? .unknown
         let slot = Slot(rawValue: slotRaw) ?? .other
-        let trackLoaded = analyzeType != 0 && slotRaw != 0
+        let playImpliesTrack = mode != .noTrack && mode != .unknown
+        let trackLoaded = slotRaw != 0 || analyzeType != 0 || trackID > 0 || playImpliesTrack
 
         return CDJStatus(
             playerNumber: player,
@@ -260,7 +418,8 @@ public struct CDJStatus {
             slot: slot,
             trackBPM: trackBPM,
             pitchPercent: pitchPercent,
-            effectiveBPM: trackBPM * pitchRatio,
+            faderPitchPercent: faderPitchPercent,
+            effectiveBPM: trackBPM * pitch1Ratio,
             beatCount: beatCount,
             beatInBar: beatInBar
         )

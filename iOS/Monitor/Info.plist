@@ -3,11 +3,11 @@
 <plist version="1.0">
 <dict>
   <key>CFBundleDevelopmentRegion</key><string>es</string>
-  <key>CFBundleDisplayName</key><string>STAGE CONNECT</string>
+  <key>CFBundleDisplayName</key><string>STAGE CONNECT Monitor</string>
   <key>CFBundleExecutable</key><string>$(EXECUTABLE_NAME)</string>
   <key>CFBundleIdentifier</key><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
-  <key>CFBundleName</key><string>STAGE CONNECT</string>
+  <key>CFBundleName</key><string>STAGE CONNECT Monitor</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>1.0</string>
   <key>CFBundleVersion</key><string>1</string>
@@ -19,23 +19,12 @@
     <string>UIInterfaceOrientationLandscapeRight</string>
     <string>UIInterfaceOrientationPortrait</string>
   </array>
-  <key>UISupportedInterfaceOrientations~ipad</key>
-  <array>
-    <string>UIInterfaceOrientationLandscapeLeft</string>
-    <string>UIInterfaceOrientationLandscapeRight</string>
-    <string>UIInterfaceOrientationPortrait</string>
-    <string>UIInterfaceOrientationPortraitUpsideDown</string>
-  </array>
   <key>NSLocalNetworkUsageDescription</key>
-  <string>STAGE CONNECT descubre y se conecta a tus reproductores Denon SC6000 (StageLinq, UDP 51337) y Pioneer/AlphaTheta CDJ (Pro DJ Link, UDP 50000-50002) en la red local. Sin este permiso no aparecen los equipos.</string>
-  <key>NSBonjourServices</key>
-  <array>
-    <string>_stagelinq._tcp</string>
-  </array>
+  <string>STAGE CONNECT Monitor se conecta al Mac en la red local (servidor web / WebSocket) para mostrar timecode y decks.</string>
   <key>NSAppTransportSecurity</key>
   <dict>
-    <key>NSAllowsLocalNetworking</key>
-    <true/>
+    <key>NSAllowsLocalNetworking</key><true/>
+    <key>NSAllowsArbitraryLoads</key><true/>
   </dict>
   <key>UIRequiresFullScreen</key><true/>
 </dict>

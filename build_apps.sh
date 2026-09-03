@@ -220,26 +220,27 @@ make_app() {
     cp "$REPO/.build/release/$BIN" "$APP/Contents/MacOS/$BIN"
     chmod +x "$APP/Contents/MacOS/$BIN"
     [ -f "$ICNS" ] && cp "$ICNS" "$APP/Contents/Resources/AppIcon.icns"
-    cat > "$APP/Contents/Info.plist" << PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-    <key>CFBundleExecutable</key><string>${BIN}</string>
-    <key>CFBundleIdentifier</key><string>${BUNDLEID}</string>
-    <key>CFBundleName</key><string>${APPNAME}</string>
-    <key>CFBundleDisplayName</key><string>${APPNAME}</string>
-    <key>CFBundleVersion</key><string>1.0</string>
-    <key>CFBundleShortVersionString</key><string>1.0</string>
-    <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleIconFile</key><string>AppIcon</string>
-    <key>NSHighResolutionCapable</key><true/>
-    <key>NSLocalNetworkUsageDescription</key><string>Necesario para conectar con reproductores DJ en la red local.</string>
-    <key>NSBonjourServices</key><array><string>_stagelinq._tcp</string></array>
-    <key>LSMinimumSystemVersion</key><string>13.0</string>
-    <key>LSApplicationCategoryType</key><string>public.app-category.music</string>
-</dict></plist>
-PLIST
-    codesign --force --deep --sign - "$APP" 2>/dev/null || true
+    local SRC_PLIST="$REPO/packaging/Info.plist"
+    if [ ! -f "$SRC_PLIST" ]; then
+        echo "ERROR: falta $SRC_PLIST" >&2
+        exit 1
+    fi
+    cp "$SRC_PLIST" "$APP/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleExecutable ${BIN}" "$APP/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier ${BUNDLEID}" "$APP/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleName ${APPNAME}" "$APP/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName ${APPNAME}" "$APP/Contents/Info.plist"
+    if ! /usr/libexec/PlistBuddy -c "Print :NSLocalNetworkUsageDescription" "$APP/Contents/Info.plist" >/dev/null 2>&1; then
+        echo "ERROR: packaging/Info.plist no tiene NSLocalNetworkUsageDescription" >&2
+        exit 1
+    fi
+    local ENT="$REPO/packaging/STAGECONNECT.entitlements"
+    if [ -f "$ENT" ]; then
+        codesign --force --deep --sign - --entitlements "$ENT" "$APP" 2>/dev/null \
+            || codesign --force --deep --sign - "$APP" 2>/dev/null || true
+    else
+        codesign --force --deep --sign - "$APP" 2>/dev/null || true
+    fi
     echo "  Bundle: $APP"
 }
 
@@ -262,3 +263,28 @@ echo ""
 echo "[4/4] Completado."
 ls -lah "$DOWNLOADS/STAGE CONNECT.app/Contents/MacOS/" 2>/dev/null || true
 ls -lah "$DOWNLOADS/STAGE CONNECT TEST.app/Contents/MacOS/" 2>/dev/null || true
+
+verify_bundle() {
+    local APP="$1"
+    local PLIST="$APP/Contents/Info.plist"
+    echo ""
+    echo "=== Verificar $APP ==="
+    if [ ! -f "$PLIST" ]; then
+        echo "ERROR: no hay Info.plist en $APP" >&2
+        exit 1
+    fi
+    echo "NSLocalNetworkUsageDescription:"
+    defaults read "$PLIST" NSLocalNetworkUsageDescription
+    echo "NSAllowsLocalNetworking:"
+    /usr/libexec/PlistBuddy -c "Print :NSAppTransportSecurity:NSAllowsLocalNetworking" "$PLIST"
+    echo "CFBundleIdentifier: $(defaults read "$PLIST" CFBundleIdentifier)"
+    echo "CFBundleExecutable: $(defaults read "$PLIST" CFBundleExecutable)"
+    if codesign -d --entitlements :- "$APP" 2>/dev/null | grep -q "network.client"; then
+        echo "Entitlements: network.client + network.server presentes"
+    else
+        echo "AVISO: no se pudieron leer entitlements firmados (ad-hoc a veces no los incrusta)"
+    fi
+}
+
+verify_bundle "$DOWNLOADS/STAGE CONNECT.app"
+verify_bundle "$DOWNLOADS/STAGE CONNECT TEST.app"
