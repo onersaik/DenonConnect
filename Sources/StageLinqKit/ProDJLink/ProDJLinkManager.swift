@@ -158,6 +158,10 @@ public final class ProDJLinkManager: ObservableObject {
     private var metaCache: [String: DBServerMeta] = [:]
     private var waveformCache: [String: DBServerWaveform] = [:]
     private var artworkCache: [String: Data] = [:]
+    /// Handshake 0x0a→0x00→0x02→0x04 ya se envió. Un CDJ de LAN que aparece
+    /// después recibe otra ráfaga (broadcast no basta si llegó tarde).
+    private var startupClaimsDone = false
+    private var lateHandshakePending = false
 
     public init() {}
 
@@ -173,7 +177,12 @@ public final class ProDJLinkManager: ObservableObject {
     }
 
     public func start() {
-        bookkeepingQueue.sync { stoppedFlag = false }
+        bookkeepingQueue.sync {
+            stoppedFlag = false
+            startupClaimsDone = false
+            lateHandshakePending = false
+        }
+        log("Pro DJ Link: arranque · \(NetworkInfo.lanIfacesLog()) · \(NetworkInfo.announceFromLog())")
         netQueue.async { [weak self] in self?.runKeepAliveListener() }
         netQueue.async { [weak self] in self?.runStatusListener() }
         netQueue.async { [weak self] in self?.runBeatListener() }
@@ -195,7 +204,7 @@ public final class ProDJLinkManager: ObservableObject {
             let socket = try UDPSocket(listenPort: DJLink.keepAlivePort, reuse: .shared)
             keepAliveSocket = socket
             setListenWarning(port: DJLink.keepAlivePort, error: nil)
-            log("Pro DJ Link: escuchando presencia en UDP :\(DJLink.keepAlivePort) (0.0.0.0)")
+            log("Pro DJ Link: bind UDP :\(DJLink.keepAlivePort) OK (0.0.0.0, REUSEADDR, sin REUSEPORT)")
 
             while !stopped {
                 guard let (data, fromIP) = socket.receive() else { continue }
@@ -205,14 +214,14 @@ public final class ProDJLinkManager: ObservableObject {
             socket.close()
         } catch {
             setListenWarning(port: DJLink.keepAlivePort, error: error)
-            log("Pro DJ Link: no se pudo escuchar en UDP \(DJLink.keepAlivePort): \(error). ¿rekordbox abierto?")
+            log("Pro DJ Link: UDP \(DJLink.keepAlivePort) ocupado: \(error). \(ListenPortReport.hint(for: DJLink.keepAlivePort))")
         }
     }
 
     private func setListenWarning(port: UInt16, error: Error?) {
         DispatchQueue.main.async {
             if let error {
-                let line = "UDP \(port): \(error)"
+                let line = "UDP \(port) ocupado: \(error). \(ListenPortReport.hint(for: port))"
                 if self.listenWarning.contains("UDP \(port)") {
                     return
                 }
@@ -344,7 +353,12 @@ public final class ProDJLinkManager: ObservableObject {
         let device = ProDJLinkDevice(
             playerNumber: playerNumber, model: model, ip: ip, isMixer: isMixer
         )
-        bookkeepingQueue.sync { devicesByKey[key] = device }
+        bookkeepingQueue.sync {
+            devicesByKey[key] = device
+            if NetworkInfo.isLANUnicastTarget(ip), startupClaimsDone {
+                lateHandshakePending = true
+            }
+        }
         DispatchQueue.main.async {
             if !self.devices.contains(where: { $0.playerNumber == device.playerNumber }) {
                 self.devices.append(device)
@@ -403,8 +417,9 @@ public final class ProDJLinkManager: ObservableObject {
         var sentIPs = Set<String>()
         for peer in peers {
             if !sentIPs.insert(peer.ip).inserted { continue }
-            let peerIPBytes = NetworkInfo.localIPv4Bytes(reaching: peer.ip)
-            guard peerIPBytes != [0, 0, 0, 0] else { continue }
+            let peerLAN = NetworkInfo.lanAddress(reaching: peer.ip)
+            guard peerLAN.isValid else { continue }
+            let peerIPBytes = peerLAN.ip
             let packet: Data
             if peerIPBytes == defaultIP {
                 packet = broadcastPacket
@@ -414,7 +429,11 @@ public final class ProDJLinkManager: ObservableObject {
                     NetworkInfo.localMACBytes(forIPv4: peerIPBytes)
                 )
             }
-            sock.send(packet, to: peer.ip, port: DJLink.keepAlivePort)
+            if peerIPBytes == defaultIP {
+                sock.send(packet, to: peer.ip, port: DJLink.keepAlivePort)
+            } else {
+                sendAnnounce(packet, to: peer.ip, port: DJLink.keepAlivePort, from: peerLAN, fallback: sock)
+            }
             guard logUnicast else { continue }
             let first: Bool = bookkeepingQueue.sync {
                 if loggedUnicastPeers.contains(peer.ip) { return false }
@@ -469,34 +488,76 @@ public final class ProDJLinkManager: ObservableObject {
         }
     }
 
+    private func sendAnnounce(
+        _ data: Data,
+        to host: String,
+        port: UInt16,
+        from lan: LANAddress,
+        fallback: UDPSocket
+    ) {
+        if !lan.isValid {
+            fallback.send(data, to: host, port: port)
+            return
+        }
+        if let bound = try? UDPSocket.boundToLAN(lan) {
+            bound.send(data, to: host, port: port)
+            bound.close()
+            return
+        }
+        fallback.send(data, to: host, port: port)
+    }
+
+    private func logVirtualIdentity(lan: LANAddress, ip: [UInt8], mac: [UInt8]) {
+        let macTxt = NetworkInfo.describeMAC(mac)
+        let player = DJLink.virtualPlayerNumber
+        if !lan.isValid || ip == [0, 0, 0, 0] {
+            log("Pro DJ Link: CDJ virtual player \(player) sin IPv4 LAN; MAC \(macTxt) — solo broadcast (los CDJ pueden ignorar 0.0.0.0)")
+            return
+        }
+        if mac.allSatisfy({ $0 == 0 }) {
+            log("[AVISO] Pro DJ Link: CDJ virtual player \(player) MAC 00:00:00:00:00:00 @ \(lan.description) — los CDJ ignoran el anuncio")
+            return
+        }
+        log("Pro DJ Link: CDJ virtual player \(player) · \(lan.description) · MAC \(macTxt)")
+    }
+
     private func runVirtualCDJAnnounce() {
-        guard let sock = try? UDPSocket(listenPort: nil) else {
+        var lan = NetworkInfo.preferredLAN()
+        guard var sock = (try? UDPSocket.boundToLAN(lan)) ?? (try? UDPSocket(listenPort: nil)) else {
             log("[AVISO] Pro DJ Link: no se pudo crear el socket de anuncio")
             return
         }
         var lastBroadcastIP: [UInt8] = []
 
-        let startIP = NetworkInfo.localIPv4Bytes()
+        let startIP = lan.ip
         let startMAC = NetworkInfo.localMACBytes(forIPv4: startIP)
         lastBroadcastIP = startIP
-        if startIP == [0, 0, 0, 0] {
-            log("Pro DJ Link: CDJ virtual player \(DJLink.virtualPlayerNumber) sin IPv4 local (0.0.0.0); solo broadcast")
-        } else {
-            log("Pro DJ Link: CDJ virtual player \(DJLink.virtualPlayerNumber) desde \(NetworkInfo.describe(startIP)) MAC \(NetworkInfo.describeMAC(startMAC)) (no se pinta)")
-        }
+        logVirtualIdentity(lan: lan, ip: startIP, mac: startMAC)
         runStartupClaims(sock: sock, ip: startIP, mac: startMAC)
+        bookkeepingQueue.sync { startupClaimsDone = true }
 
         while !stopped {
-            let ipBytes = NetworkInfo.localIPv4Bytes()
+            let next = NetworkInfo.preferredLAN()
+            if next != lan {
+                sock.close()
+                lan = next
+                sock = (try? UDPSocket.boundToLAN(lan)) ?? (try? UDPSocket(listenPort: nil)) ?? sock
+            }
+            let ipBytes = lan.ip
             let macBytes = NetworkInfo.localMACBytes(forIPv4: ipBytes)
             if ipBytes != lastBroadcastIP {
                 lastBroadcastIP = ipBytes
-                let ipTxt = NetworkInfo.describe(ipBytes)
-                if ipBytes == [0, 0, 0, 0] {
-                    log("Pro DJ Link: CDJ virtual player \(DJLink.virtualPlayerNumber) sin IPv4 local (0.0.0.0); solo broadcast")
-                } else {
-                    log("Pro DJ Link: CDJ virtual player \(DJLink.virtualPlayerNumber) desde \(ipTxt) MAC \(NetworkInfo.describeMAC(macBytes)) (no se pinta)")
-                }
+                logVirtualIdentity(lan: lan, ip: ipBytes, mac: macBytes)
+            }
+
+            let redoHandshake = bookkeepingQueue.sync {
+                let pending = lateHandshakePending
+                lateHandshakePending = false
+                return pending
+            }
+            if redoHandshake {
+                log("Pro DJ Link: CDJ de LAN nuevo — handshake 0x0a×3 → 0x00×3 → 0x02×3 → 0x04×3 (broadcast+unicast)")
+                runStartupClaims(sock: sock, ip: ipBytes, mac: macBytes)
             }
 
             emitVirtualAnnounce(
@@ -517,7 +578,7 @@ public final class ProDJLinkManager: ObservableObject {
             let socket = try UDPSocket(listenPort: DJLink.statusPort, reuse: .unicast)
             statusSocket = socket
             setListenWarning(port: DJLink.statusPort, error: nil)
-            log("Pro DJ Link: escuchando estado en UDP :\(DJLink.statusPort)")
+            log("Pro DJ Link: bind UDP :\(DJLink.statusPort) OK (exclusivo, sin REUSEADDR/REUSEPORT)")
 
             while !stopped {
                 guard let (data, ip) = socket.receive() else { continue }
@@ -527,7 +588,7 @@ public final class ProDJLinkManager: ObservableObject {
             socket.close()
         } catch {
             setListenWarning(port: DJLink.statusPort, error: error)
-            log("Pro DJ Link: no se pudo escuchar en UDP \(DJLink.statusPort): \(error). \(ListenPortReport.hint(for: DJLink.statusPort))")
+            log("Pro DJ Link: UDP \(DJLink.statusPort) ocupado: \(error). \(ListenPortReport.hint(for: DJLink.statusPort))")
         }
     }
 
@@ -538,7 +599,7 @@ public final class ProDJLinkManager: ObservableObject {
             let socket = try UDPSocket(listenPort: DJLink.beatPort, reuse: .unicast)
             beatSocket = socket
             setListenWarning(port: DJLink.beatPort, error: nil)
-            log("Pro DJ Link: escuchando beats en UDP :\(DJLink.beatPort)")
+            log("Pro DJ Link: bind UDP :\(DJLink.beatPort) OK (exclusivo, sin REUSEADDR/REUSEPORT)")
 
             while !stopped {
                 guard let (data, ip) = socket.receive() else { continue }
@@ -553,7 +614,7 @@ public final class ProDJLinkManager: ObservableObject {
             socket.close()
         } catch {
             setListenWarning(port: DJLink.beatPort, error: error)
-            log("Pro DJ Link: no se pudo escuchar en UDP \(DJLink.beatPort): \(error). \(ListenPortReport.hint(for: DJLink.beatPort))")
+            log("Pro DJ Link: UDP \(DJLink.beatPort) ocupado: \(error). \(ListenPortReport.hint(for: DJLink.beatPort))")
         }
     }
 
@@ -564,7 +625,7 @@ public final class ProDJLinkManager: ObservableObject {
             Thread.sleep(forTimeInterval: 0.5)
             let now = Date()
             let stale: [ProDJLinkDevice] = bookkeepingQueue.sync {
-                devicesByKey.values.filter { now.timeIntervalSince($0.lastSeen) > 8.0 }
+                devicesByKey.values.filter { now.timeIntervalSince($0.lastSeen) > 20.0 }
             }
             guard !stale.isEmpty else { continue }
             let keys = stale.map { String($0.playerNumber) }

@@ -45,31 +45,20 @@ make_app() {
   cp "$REPO/.build/release/$BIN" "$APP/Contents/MacOS/$BIN"
   chmod +x "$APP/Contents/MacOS/$BIN"
   [ -f "$ICNS" ] && cp "$ICNS" "$APP/Contents/Resources/AppIcon.icns"
-  cat > "$APP/Contents/Info.plist" << PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>CFBundleExecutable</key><string>${BIN}</string>
-  <key>CFBundleIdentifier</key><string>${BUNDLEID}</string>
-  <key>CFBundleName</key><string>${APPNAME}</string>
-  <key>CFBundleDisplayName</key><string>${APPNAME}</string>
-  <key>CFBundleVersion</key><string>1.0</string>
-  <key>CFBundleShortVersionString</key><string>1.0</string>
-  <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleIconFile</key><string>AppIcon</string>
-  <key>NSHighResolutionCapable</key><true/>
-  <key>NSLocalNetworkUsageDescription</key>
-  <string>STAGE CONNECT descubre y se conecta a tus reproductores Denon SC6000 (StageLinq, UDP 51337) y Pioneer/AlphaTheta CDJ (Pro DJ Link, UDP 50000-50002) en la red local. Sin este permiso no aparecen los equipos.</string>
-  <key>NSBonjourServices</key><array><string>_stagelinq._tcp</string></array>
-  <key>NSAppTransportSecurity</key>
-  <dict>
-    <key>NSAllowsLocalNetworking</key>
-    <true/>
-  </dict>
-  <key>LSMinimumSystemVersion</key><string>13.0</string>
-  <key>LSApplicationCategoryType</key><string>public.app-category.music</string>
-</dict></plist>
-PLIST
+  local SRC_PLIST="$REPO/packaging/Info.plist"
+  if [ ! -f "$SRC_PLIST" ]; then
+    echo "ERROR: falta $SRC_PLIST" >&2
+    exit 1
+  fi
+  cp "$SRC_PLIST" "$APP/Contents/Info.plist"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleExecutable ${BIN}" "$APP/Contents/Info.plist"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier ${BUNDLEID}" "$APP/Contents/Info.plist"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleName ${APPNAME}" "$APP/Contents/Info.plist"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName ${APPNAME}" "$APP/Contents/Info.plist"
+  if ! /usr/libexec/PlistBuddy -c "Print :NSLocalNetworkUsageDescription" "$APP/Contents/Info.plist" >/dev/null 2>&1; then
+    echo "ERROR: packaging/Info.plist no tiene NSLocalNetworkUsageDescription" >&2
+    exit 1
+  fi
   local ENT="$REPO/packaging/STAGECONNECT.entitlements"
   if [ -f "$ENT" ]; then
     codesign --force --deep --sign - --entitlements "$ENT" "$APP" >/dev/null 2>&1 \

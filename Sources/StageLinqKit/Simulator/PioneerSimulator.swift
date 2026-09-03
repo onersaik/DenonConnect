@@ -58,7 +58,8 @@ public final class PioneerSimulator {
     }
 
     private func makeSocket() -> UDPSocket? {
-        guard let sock = try? UDPSocket(listenPort: nil) else { return nil }
+        let lan = NetworkInfo.preferredLAN()
+        guard let sock = (try? UDPSocket.boundToLAN(lan)) ?? (try? UDPSocket(listenPort: nil)) else { return nil }
         stateQueue.sync { sockets.append(sock) }
         return sock
     }
@@ -126,7 +127,7 @@ public final class PioneerSimulator {
 
     private func runKeepAlive() {
         guard let sock = makeSocket() else { return }
-        let ip = NetworkInfo.localIPv4Bytes()
+        let ip = NetworkInfo.preferredLAN().ip
         let packet = DJLinkKeepAlive.buildVirtualCDJ(
             playerNumber: playerNumber,
             model: model,

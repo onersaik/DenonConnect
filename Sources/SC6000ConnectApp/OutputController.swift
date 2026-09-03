@@ -4,9 +4,10 @@
 // Tick a 60 Hz para clavar el timecode al playhead de la pista.
 //
 // SMPTE: dos capas independientes.
-//   MASTER — un LTC de casa que sigue al deck master / On Air / fader / el que suena.
-//   POR DECK — un generador por fila, cada uno con su dispositivo CoreAudio.
-// Apagar un botón hace stop() real: no pausa en 0, no re-arma el auto-follow.
+//   MASTER — un playhead, N engines (un AU por device). Sigue al deck master / On Air / fader.
+//   POR DECK — otro fan-out por fila. LOCK no escribe en MASTER y MASTER no escribe en la fila.
+// Seek/pause/play se replica a todos los engines de esa fuente; si uno se desfasó, el tick unifica.
+// Apagar = stop de todos. Primer frame al armar = posición real (0 → 00:00:00:00).
 
 import Foundation
 import Combine
@@ -78,6 +79,9 @@ final class OutputController: ObservableObject {
     /// LOCK por fila: el Master auto-follow / fader / On Air no pisan este deck.
     /// Con LTC propio en otra salida, su generador sigue el playhead de esta fila.
     @Published var ltcDeckLocked: [String: Bool] = [:]
+    /// Filas que Dual/Auto/Pioneer están pintando. El MASTER auto-follow no
+    /// sigue un CDJ 5.º oculto ni un TEST que la vista no muestra.
+    private var visibleDeckIDs: [String] = []
 
     // MARK: MIDI Timecode (MTC)
     @Published var mtcEnabled         = false
@@ -212,6 +216,17 @@ final class OutputController: ObservableObject {
 
     func setDeckLocked(_ id: String, locked: Bool) {
         ltcDeckLocked[canonicalDeckKey(id)] = locked
+        // LOCK no arranca ni para MASTER, ni toca otro generador.
+    }
+
+    /// IDs de las filas visibles (Dual tope 4 CDJ). Vacío = no filtrar.
+    func setVisibleDeckIDs(_ ids: [String]) {
+        visibleDeckIDs = ids
+    }
+
+    private func isVisibleSource(_ id: String?) -> Bool {
+        guard let id, !visibleDeckIDs.isEmpty else { return true }
+        return visibleDeckIDs.contains { Self.sameDeckID($0, id) }
     }
 
     /// El deck emite LTC en un dispositivo distinto al Master de casa.
@@ -305,7 +320,8 @@ final class OutputController: ObservableObject {
         }
         ltcSourceDeckID = id
         ltcAutoFollow = false
-        if ltcEnabled, !isDeckLocked(id) {
+        // LOCK no pisa MASTER: el pin actualiza el fan-out de casa, no el de la fila.
+        if ltcEnabled {
             applyToMaster(snapshotForDeckID(id))
         }
     }
@@ -366,7 +382,7 @@ final class OutputController: ObservableObject {
             let fan = LTCFanout(name: "Master", log: { [weak self] in self?.logSink?($0) })
             fan.frameRate = ltcFrameRate
             try fan.start(deviceIDs: ids, playhead: snap.playhead, playing: false)
-            applyPlayhead(fan, snap)
+            applyPlayhead(fan, snap)  // primer frame = playhead real; play/pause a todos
             ltc = fan
             ltcEnabled = true
             ltcFollowedDeckID = snap.sourceDeckID
@@ -736,6 +752,7 @@ final class OutputController: ObservableObject {
         applyPlayhead(ltc, snap)
     }
 
+    /// Un fan-out (MASTER o una fila). Nunca escribe en el otro.
     private func applyPlayhead(_ fan: LTCFanout?, _ snap: SyncSnapshot?) {
         guard let fan else { return }
         guard let snap else {
@@ -841,13 +858,10 @@ final class OutputController: ObservableObject {
                     let overlay = denonOverlay(for: device, deck: deck)
                     let loaded = overlay?.loaded ?? deck.songLoaded
                     guard loaded else { continue }
-                    let layer = DeckDisplayBuilder.denonLayerCaption(deck.id)
                     let id = device.isDenonSimulator
                         ? DeckDisplayBuilder.testDenonID(deck.id - 1)
                         : "denon-\(device.id)-\(deck.id)"
-                    add(id, device.isDenonSimulator
-                        ? DeckDisplayBuilder.productDenonLabel(layer: deck.id)
-                        : "SC6000 · \(DeckDisplayBuilder.displayDeviceName(device.name.isEmpty ? "SC6000" : device.name)) \(layer)")
+                    add(id, DeckDisplayBuilder.productDenonLabel(layer: deck.id))
                 }
             }
         }
@@ -911,9 +925,7 @@ final class OutputController: ObservableObject {
                     guard overlay?.loaded ?? deck.songLoaded else { continue }
                     let bpm = MusicalClock.bpm(overlay?.bpm ?? 0, deck.bpm, deck.beatBpm)
                     let layer = DeckDisplayBuilder.denonLayerCaption(deck.id)
-                    let denonLabel = device.isDenonSimulator
-                        ? DeckDisplayBuilder.productDenonLabel(layer: deck.id)
-                        : "SC6000 · \(DeckDisplayBuilder.displayDeviceName(device.name.isEmpty ? "SC6000" : device.name)) \(layer)"
+                    let denonLabel = DeckDisplayBuilder.productDenonLabel(layer: deck.id)
                     let prog  = overlay?.progress ?? deck.beatProgress
                     let elapsed: Double? = overlay?.position ?? prog.map { $0 * deck.trackLength }
                     let deckID = device.isDenonSimulator
@@ -1069,6 +1081,7 @@ final class OutputController: ObservableObject {
                                                 id: DeckDisplayBuilder.testDenonID(layer),
                                                 isMaster: overlay.isMaster)
             }
+            return nil
         }
         if id.hasPrefix("denon-"), !id.hasPrefix("denon-test-"), let sl = stageLinq {
             for device in sl.devices {
@@ -1078,11 +1091,7 @@ final class OutputController: ObservableObject {
                     }
                 }
             }
-            if let layer = Self.denonLayer(id), let overlay = denonTestOverlay(layer: layer) {
-                return makeTestLinkSyncSnapshot(overlay, label: DeckDisplayBuilder.productDenonLabel(layer: layer + 1),
-                                                id: DeckDisplayBuilder.testDenonID(layer),
-                                                isMaster: overlay.isMaster)
-            }
+            return nil
         }
         if id.hasPrefix("pioneer-"), let pdl = proDJLink {
             for device in pdl.devices {
@@ -1137,9 +1146,7 @@ final class OutputController: ObservableObject {
                 : b,
             playhead: playhead,
             isPlaying: playing,
-            sourceLabel: device.isDenonSimulator
-                ? DeckDisplayBuilder.productDenonLabel(layer: deck.id)
-                : "SC6000 · \(DeckDisplayBuilder.displayDeviceName(device.name.isEmpty ? "SC6000" : device.name)) \(DeckDisplayBuilder.denonLayerCaption(deck.id))",
+            sourceLabel: DeckDisplayBuilder.productDenonLabel(layer: deck.id),
             trackTitle: title.isEmpty ? nil : title,
             trackArtist: (overlay?.artist ?? deck.trackArtist).isEmpty ? nil : (overlay?.artist ?? deck.trackArtist),
             sourceDeckID: id,
@@ -1184,14 +1191,9 @@ final class OutputController: ObservableObject {
     // MARK: Master snapshot (fader / On Air / Master LED / el que suena)
 
     private func snapshotForMaster() -> SyncSnapshot {
-        if !ltcAutoFollow, let id = ltcSourceDeckID, !isDeckLocked(id) {
+        // Pin MASTER: LOCK no lo suelta. El generador de la fila locked es otro.
+        if !ltcAutoFollow, let id = ltcSourceDeckID {
             if let specific = snapshotForDeckID(id) { return specific }
-            if let layer = Self.denonLayer(id),
-               let overlay = denonTestOverlay(layer: layer) {
-                return makeTestLinkSyncSnapshot(overlay, label: DeckDisplayBuilder.productDenonLabel(layer: layer + 1),
-                                                id: DeckDisplayBuilder.testDenonID(layer),
-                                                isMaster: overlay.isMaster)
-            }
         }
         return currentSnapshot()
     }
@@ -1204,6 +1206,9 @@ final class OutputController: ObservableObject {
         var anyLoaded: SyncSnapshot?
 
         func consider(_ snap: SyncSnapshot) {
+            // Dual/filtro de vista: no seguir un CDJ oculto ni TEST que no se pinta.
+            if !isVisibleSource(snap.sourceDeckID) { return }
+            // Auto-follow no roba un deck LOCK: esa fila tiene (o puede tener) LTC propio.
             if let sid = snap.sourceDeckID, isDeckLocked(sid) { return }
             if snap.playhead != nil && anyLoaded == nil { anyLoaded = snap }
             if snap.isPlaying && anyPlaying == nil { anyPlaying = snap }
@@ -1284,9 +1289,7 @@ final class OutputController: ObservableObject {
 
     private static func looksLikeDenonSimulatorID(_ id: String) -> Bool {
         if id.hasPrefix("denon-test-") { return true }
-        let u = id.uppercased()
         if StageLinqDevice.isDenonSimulatorName(id) { return true }
-        if u.contains("SC6000-SIM") || u.contains("SC6000 TEST") { return true }
         guard id.hasPrefix("denon-"), !id.hasPrefix("denon-test-") else { return false }
         let rest = String(id.dropFirst("denon-".count))
         guard let dash = rest.lastIndex(of: "-") else { return false }

@@ -23,12 +23,23 @@ struct WaveformView: View {
     var peaksLow:    [UInt8] = []
     var peaksMid:    [UInt8] = []
     var peaksHigh:   [UInt8] = []
+    var extraCueFractions: [Double] = []
     var cuePositionFraction: Double? = nil
     var loopInFraction:  Double? = nil
     var loopOutFraction: Double? = nil
     var mode: WaveformMode = .scrolling
     /// Ventana visible en segundos. CDJ ~12 s.
     var windowSeconds: Double = 12.0
+
+    private var allCueFractions: [Double] {
+        var out = extraCueFractions.filter { $0 >= 0 && $0 <= 1 }
+        if let c = cuePositionFraction, c >= 0, c <= 1 {
+            if !out.contains(where: { abs($0 - c) < 0.0008 }) {
+                out.append(c)
+            }
+        }
+        return out
+    }
 
     var body: some View {
         Canvas { ctx, size in
@@ -131,7 +142,7 @@ struct WaveformView: View {
         if hasTimeline {
             drawPlayhead(ctx: ctx, x: playX, size: size)
         }
-        if let cue = cuePositionFraction {
+        for cue in allCueFractions {
             strokeMarker(ctx: ctx, x: CGFloat(cue) * size.width, size: size, color: Color.orange)
         }
     }
@@ -314,10 +325,12 @@ struct WaveformView: View {
     }
 
     private func drawCueScrolling(ctx: GraphicsContext, size: CGSize, elapsed: Double, secPerCol: Double, shift: CGFloat, colW: CGFloat, cols: Int) {
-        guard let cueFrac = cuePositionFraction, durationSeconds > 0 else { return }
-        let cx = xForTime(cueFrac * durationSeconds, elapsed: elapsed, secPerCol: secPerCol, shift: shift, colW: colW, cols: cols)
-        guard cx >= 0 && cx <= size.width else { return }
-        strokeMarker(ctx: ctx, x: cx, size: size, color: Color.orange)
+        guard durationSeconds > 0 else { return }
+        for cueFrac in allCueFractions {
+            let cx = xForTime(cueFrac * durationSeconds, elapsed: elapsed, secPerCol: secPerCol, shift: shift, colW: colW, cols: cols)
+            guard cx >= 0 && cx <= size.width else { continue }
+            strokeMarker(ctx: ctx, x: cx, size: size, color: Color.orange)
+        }
     }
 
     private func strokeMarker(ctx: GraphicsContext, x: CGFloat, size: CGSize, color: Color) {

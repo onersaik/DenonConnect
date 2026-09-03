@@ -717,12 +717,14 @@ final class SimulatorController: ObservableObject {
         guard let raw, let imageData = unwrapImageData(raw), let image = NSImage(data: imageData) else {
             return ("", "")
         }
-        let dir = StageConnectArtworkStore.writableDirectory()
-        let dest = dir.appendingPathComponent("sct-art-\(abs(url.path.hashValue)).jpg")
+        let jpeg = boundedArtworkJPEG(from: image)
+        guard let dest = StageConnectArtworkStore.publishedFileURL(named: "sct-art-\(abs(url.path.hashValue)).jpg") else {
+            return ("", jpeg)
+        }
         let full = jpegData(from: image, maxEdge: 400, quality: 0.78)
         if let full { try? full.write(to: dest, options: .atomic) }
-        let path = FileManager.default.fileExists(atPath: dest.path) ? dest.path : ""
-        let jpeg = boundedArtworkJPEG(from: image)
+        let path = FileManager.default.fileExists(atPath: dest.path) && !StageConnectArtworkStore.isEphemeral(dest.path)
+            ? dest.path : ""
         return (path, jpeg)
     }
 

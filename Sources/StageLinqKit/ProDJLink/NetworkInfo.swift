@@ -2,51 +2,97 @@
 // Datos de la interfaz de red local. Necesarios porque el paquete de presencia
 // Pro DJ Link debe incluir nuestra propia IP para que los CDJ sepan a dónde
 // enviarnos el estado detallado.
+//
+// Con VPN (utun) la ruta por defecto no es la LAN: si anunciamos esa IP,
+// los SC6000/CDJ no pueden devolver HOWDY ni estado.
 
 import Foundation
 #if canImport(Darwin)
 import Darwin
 #endif
+#if canImport(SystemConfiguration)
+import SystemConfiguration
+#endif
+
+public struct LANAddress: Equatable {
+    public let ip: [UInt8]
+    public let interface: String
+
+    public var isValid: Bool { ip.count == 4 && ip != [0, 0, 0, 0] }
+
+    public var description: String {
+        let ipTxt = NetworkInfo.describe(ip)
+        if interface.isEmpty { return ipTxt }
+        return "\(ipTxt) (\(interface))"
+    }
+}
 
 public enum NetworkInfo {
     private struct IPv4Iface {
         let name: String
         let ip: [UInt8]
         let netmask: [UInt8]
+        let kind: Kind
     }
 
-    /// IPv4 de la primera interfaz activa que no sea loopback, como 4 bytes.
-    /// Prioriza interfaces "en" (Ethernet/Wi-Fi en macOS) sobre el resto.
+    private enum Kind: Int {
+        case ethernet = 0
+        case wifi = 1
+        case otherEN = 2
+    }
+
+    /// IPv4 LAN preferida (Ethernet, luego Wi‑Fi). Nunca utun/VPN.
     public static func localIPv4Bytes() -> [UInt8] {
-        localIPv4Bytes(reaching: nil)
+        preferredLAN().ip
     }
 
-    /// IPv4 local que puede alcanzar `peerIP` (misma subred). Si no hay
-    /// coincidencia, la `en*` preferida — nunca se inventa otra player IP.
+    /// IPv4 local que puede alcanzar `peerIP` (misma subred en `en*`).
+    /// Si no hay coincidencia, la LAN preferida — nunca una IP de túnel.
     public static func localIPv4Bytes(reaching peerIP: String?) -> [UInt8] {
-        let ifaces = collectIPv4Ifaces(includeLoopback: false)
+        lanAddress(reaching: peerIP).ip
+    }
+
+    public static func preferredLAN() -> LANAddress {
+        lanAddress(reaching: nil)
+    }
+
+    public static func lanAddress(reaching peerIP: String?) -> LANAddress {
+        let ifaces = collectLANIfaces()
         if let peerIP, let peer = ipv4Bytes(from: peerIP) {
-            if let match = ifaces.first(where: {
-                $0.name.hasPrefix("en") && sameSubnet($0.ip, $0.netmask, peer)
-            }) {
-                return match.ip
-            }
-            if let match = ifaces.first(where: { sameSubnet($0.ip, $0.netmask, peer) }) {
-                return match.ip
+            let matches = ifaces.filter { sameSubnet($0.ip, $0.netmask, peer) }
+            if let match = matches.min(by: { $0.kind.rawValue < $1.kind.rawValue }) {
+                return LANAddress(ip: match.ip, interface: match.name)
             }
         }
-        if let en = ifaces.first(where: { $0.name.hasPrefix("en") }) {
-            return en.ip
+        if let best = ifaces.min(by: { $0.kind.rawValue < $1.kind.rawValue }) {
+            return LANAddress(ip: best.ip, interface: best.name)
         }
-        return ifaces.first?.ip ?? [0, 0, 0, 0]
+        return LANAddress(ip: [0, 0, 0, 0], interface: "")
+    }
+
+    /// Texto para el panel terminal: “anunciando desde 192.168.x.x (en0)”.
+    public static func announceFromLog(reaching peerIP: String? = nil) -> String {
+        let lan = lanAddress(reaching: peerIP)
+        if !lan.isValid { return "anunciando desde 0.0.0.0" }
+        return "anunciando desde \(lan.description)"
+    }
+
+    /// Candidatas en* (Ethernet > Wi‑Fi), sin utun/VPN/awdl/bridge/169.254.
+    public static func lanIfacesLog() -> String {
+        let ifaces = collectLANIfaces()
+        if ifaces.isEmpty {
+            return "LAN: ninguna interfaz en* con IPv4 (Ethernet/Wi‑Fi)"
+        }
+        return "LAN: " + ifaces.map { "\($0.name)=\(describe($0.ip))" }.joined(separator: ", ")
     }
 
     /// CDJ de LAN al que cabe unicast del keepalive virtual. Excluye loopback,
-    /// broadcast y este Mac (Pioneer TEST / Dual local no reciben spam).
+    /// broadcast, link-local y este Mac (Pioneer TEST / Dual local no reciben spam).
     public static func isLANUnicastTarget(_ ip: String) -> Bool {
         guard let bytes = ipv4Bytes(from: ip) else { return false }
         if bytes[0] == 127 { return false }
         if bytes == [255, 255, 255, 255] { return false }
+        if isLinkLocal(bytes) { return false }
         if isLocalIPv4(ip) { return false }
         return true
     }
@@ -72,6 +118,49 @@ public enum NetworkInfo {
             if (ip[i] & mask[i]) != (peer[i] & mask[i]) { return false }
         }
         return true
+    }
+
+    private static func isLinkLocal(_ ip: [UInt8]) -> Bool {
+        ip.count == 4 && ip[0] == 169 && ip[1] == 254
+    }
+
+    /// 10.8/16 y 10.9/16: típicas de OpenVPN / túnel. En `en*` se aceptan
+    /// (LAN rara); en utun/bridge no llegan aquí porque no son `en*`.
+    private static func isRejectedName(_ name: String) -> Bool {
+        let n = name.lowercased()
+        if n == "lo" || n.hasPrefix("lo") { return true }
+        if n.hasPrefix("utun") { return true }
+        if n.hasPrefix("awdl") { return true }
+        if n.hasPrefix("llw") { return true }
+        if n.hasPrefix("bridge") { return true }
+        return false
+    }
+
+    /// Candidatas para anunciar hacia CDJ/SC6000: solo `en*` vivas, sin
+    /// link-local. Ethernet por delante de Wi‑Fi.
+    private static func collectLANIfaces() -> [IPv4Iface] {
+        collectIPv4Ifaces(includeLoopback: false).compactMap { iface -> IPv4Iface? in
+            if isRejectedName(iface.name) { return nil }
+            if !iface.name.hasPrefix("en") { return nil }
+            if isLinkLocal(iface.ip) { return nil }
+            let kind = mediaKind(for: iface.name)
+            return IPv4Iface(name: iface.name, ip: iface.ip, netmask: iface.netmask, kind: kind)
+        }
+        .sorted { $0.kind.rawValue < $1.kind.rawValue }
+    }
+
+    private static func mediaKind(for name: String) -> Kind {
+        #if canImport(SystemConfiguration)
+        let cfList = SCNetworkInterfaceCopyAll()
+        for case let iface as SCNetworkInterface in cfList as NSArray {
+            guard let bsd = SCNetworkInterfaceGetBSDName(iface) as String?, bsd == name else { continue }
+            let type = (SCNetworkInterfaceGetInterfaceType(iface) as String?) ?? ""
+            if type == (kSCNetworkInterfaceTypeEthernet as String) { return .ethernet }
+            if type == (kSCNetworkInterfaceTypeIEEE80211 as String) { return .wifi }
+            return .otherEN
+        }
+        #endif
+        return .otherEN
     }
 
     private static func collectIPv4Ifaces(includeLoopback: Bool) -> [IPv4Iface] {
@@ -118,7 +207,8 @@ public enum NetworkInfo {
             result.append(IPv4Iface(
                 name: String(cString: interface.ifa_name),
                 ip: ip,
-                netmask: netmask
+                netmask: netmask,
+                kind: .otherEN
             ))
         }
         return result
@@ -177,7 +267,7 @@ public enum NetworkInfo {
         return bytes.map { String(format: "%02x", $0) }.joined(separator: ":")
     }
 
-    private static func interfaceName(forIPv4 ip: [UInt8]) -> String? {
+    public static func interfaceName(forIPv4 ip: [UInt8]) -> String? {
         guard ip.count == 4, ip != [0, 0, 0, 0] else { return nil }
         return collectIPv4Ifaces(includeLoopback: false).first(where: { $0.ip == ip })?.name
     }

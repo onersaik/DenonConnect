@@ -14,6 +14,8 @@ struct OutputsView: View {
     @EnvironmentObject var mapping: MappingController
     @EnvironmentObject var labels: DeckLabelStore
     @EnvironmentObject var software: SoftwareDJManager
+    @EnvironmentObject var theme: ThemeStore
+    @EnvironmentObject var localization: LocalizationStore
     @Environment(\.presentationMode) private var presentation
     @Environment(\.openWindow) private var openWindow
 
@@ -29,7 +31,9 @@ struct OutputsView: View {
         case history = "Historial"
         case labels   = "Etiquetas"
         case mapping = "Mapeo"
-        case license = "Licencia"
+        case license    = "Licencia"
+        case language   = "Idioma"
+        case appearance = "Apariencia"
 
         var icon: String {
             switch self {
@@ -41,7 +45,9 @@ struct OutputsView: View {
             case .history: return "clock.arrow.circlepath"
             case .labels:  return "tag"
             case .mapping: return "keyboard"
-            case .license: return "key.fill"
+            case .license:    return "key.fill"
+            case .language:   return "globe"
+            case .appearance: return "circle.lefthalf.filled"
             }
         }
     }
@@ -104,7 +110,8 @@ struct OutputsView: View {
                 Text(s.rawValue)
                     .font(.system(size: 12, weight: active ? .semibold : .regular))
                     .foregroundColor(active ? Theme.textPrimary : Theme.textSecondary)
-                Spacer()
+                    .noClip()
+                Spacer(minLength: 4)
                 // Indicador activo
                 if s == .ltc && outputs.ltcAnyEnabled { dot(Theme.cyan) }
                 if s == .mtc && outputs.mtcEnabled   { dot(Theme.purple) }
@@ -113,7 +120,7 @@ struct OutputsView: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
-            .background(active ? Color.white.opacity(0.06) : Color.clear)
+            .background(active ? Theme.overlay(0.06) : Color.clear)
         }
         .buttonStyle(.plain)
     }
@@ -160,7 +167,9 @@ struct OutputsView: View {
                 case .history: historySection
                 case .labels:  labelsSection
                 case .mapping: mappingSection
-                case .license: licenseSection
+                case .license:    licenseSection
+                case .language:   languageSection
+                case .appearance: appearanceSection
                 }
             }
             .padding(22)
@@ -173,7 +182,7 @@ struct OutputsView: View {
     private var ltcSection: some View {
         VStack(alignment: .leading, spacing: 16) {
             sectionHeader(icon: "waveform.path", title: "SMPTE LTC",
-                          subtitle: "MASTER es el LTC de casa: un generador, una salida, sigue al deck master / On Air / el que suena. LOCK en una fila con salida propia ancla ese generador; el master no lo pisa y puede ir a otro deck. SMPTE de fila enciende el LTC de esa pista.")
+                          subtitle: "MASTER es el LTC de casa: un playhead, N salidas. Sigue al deck master / On Air / el que suena. LOCK en una fila con salida propia ancla ese generador; no pisa al MASTER ni al revés. SMPTE de fila enciende el LTC de esa pista.")
 
             Text(outputs.ltcTimecode)
                 .font(.system(size: 32, weight: .bold, design: .monospaced))
@@ -204,7 +213,7 @@ struct OutputsView: View {
                 .foregroundColor(outputs.ltcEnabled ? .black : Theme.textSecondary)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 9)
-                .background(Rectangle().fill(outputs.ltcEnabled ? Theme.ledGreen : Color.white.opacity(0.07)))
+                .background(Rectangle().fill(outputs.ltcEnabled ? Theme.ledGreen : Theme.overlay(0.07)))
             }
             .buttonStyle(.plain)
 
@@ -245,7 +254,7 @@ struct OutputsView: View {
                 }
             }
 
-            Text("El MASTER salta al playhead del nuevo deck (LED Master, On Air o fader), no reinicia el reloj. Play 1×, pausa congela, seek salta. LOCK + salida separada: esa fila sigue su playhead; el master va a otro deck.")
+            Text("El MASTER salta al playhead del nuevo deck (LED Master, On Air o fader), no reinicia el reloj. Play 1×, pausa congela, seek salta en todas las salidas de esa fuente. Si un device se desfasó, el tick unifica. LOCK + salida separada: esa fila sigue su playhead; el master no la pisa.")
                 .font(.system(size: 10))
                 .foregroundColor(Theme.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -292,7 +301,7 @@ struct OutputsView: View {
                                     .foregroundColor(outputs.isDeckLocked(slot.id) ? .black : Theme.textTertiary)
                                     .padding(.horizontal, 6)
                                     .padding(.vertical, 3)
-                                    .background(Rectangle().fill(outputs.isDeckLocked(slot.id) ? Theme.yellow : Color.white.opacity(0.08)))
+                                    .background(Rectangle().fill(outputs.isDeckLocked(slot.id) ? Theme.yellow : Theme.overlay(0.08)))
                                 }
                                 .buttonStyle(.plain)
                                 .help("Con salida separada, el MASTER no pisa este generador.")
@@ -727,7 +736,7 @@ struct OutputsView: View {
                         }
                         .padding(.vertical, 8)
                         .padding(.horizontal, 12)
-                        .background(Color.white.opacity(0.03))
+                        .background(Theme.overlay(0.03))
                         .cornerRadius(6)
                         .padding(.vertical, 2)
                     }
@@ -757,7 +766,7 @@ struct OutputsView: View {
                 }
                 .foregroundColor(Theme.textPrimary)
                 .padding(12)
-                .background(Rectangle().fill(Color.white.opacity(0.07)))
+                .background(Rectangle().fill(Theme.overlay(0.07)))
             }
             .buttonStyle(.plain)
             .help("Ventana aparte para llevar a otro monitor. Fondo negro.")
@@ -776,7 +785,7 @@ struct OutputsView: View {
                 }
                 .foregroundColor(Theme.textPrimary)
                 .padding(12)
-                .background(Rectangle().fill(Color.white.opacity(0.07)))
+                .background(Rectangle().fill(Theme.overlay(0.07)))
             }
             .buttonStyle(.plain)
             .help("Lista de concierto en ventana aparte.")
@@ -947,7 +956,7 @@ struct OutputsView: View {
             .foregroundColor(on ? Theme.ledGreen : Theme.textTertiary)
             .padding(.horizontal, 12)
             .padding(.vertical, 9)
-            .background(Rectangle().fill(Color.white.opacity(on ? 0.10 : 0.05)))
+            .background(Rectangle().fill(Theme.overlay(on ? 0.10 : 0.05)))
             .overlay(Rectangle().stroke(on ? Theme.ledGreen.opacity(0.35) : Theme.panelBorder, lineWidth: 1))
         }
         .buttonStyle(.plain)
@@ -1018,6 +1027,104 @@ struct OutputsView: View {
         .font(.system(size: 10))
         .buttonStyle(.plain)
         .padding(.vertical, 5)
+    }
+
+
+    // MARK: Idioma
+
+    private var languageSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            sectionHeader(icon: "globe", title: "IDIOMA",
+                          subtitle: "Selecciona el idioma de la interfaz.")
+
+            settingsPanel {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(AppLanguage.allCases) { lang in
+                        Button {
+                            localization.language = lang
+                        } label: {
+                            HStack(spacing: 10) {
+                                Text(lang.flag)
+                                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                    .foregroundColor(Theme.textTertiary)
+                                    .frame(width: 24)
+                                Text(lang.displayName)
+                                    .font(.system(size: 12, weight: localization.language == lang ? .semibold : .regular))
+                                    .foregroundColor(localization.language == lang ? Theme.textPrimary : Theme.textSecondary)
+                                Spacer()
+                                if localization.language == lang {
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 10, weight: .bold))
+                                        .foregroundColor(Theme.accent)
+                                }
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 7)
+                            .background(
+                                Rectangle()
+                                    .fill(localization.language == lang ? Theme.accent.opacity(0.10) : Color.clear)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        if lang != AppLanguage.allCases.last {
+                            Divider().background(Theme.panelBorder)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: Apariencia
+
+    private var appearanceSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            sectionHeader(icon: "circle.lefthalf.filled", title: "APARIENCIA",
+                          subtitle: "Cambia entre modo oscuro y claro.")
+
+            settingsPanel {
+                labelRow(label: "Modo") {
+                    HStack(spacing: 0) {
+                        Button {
+                            if !theme.isDark { theme.toggle() }
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "moon.fill")
+                                    .font(.system(size: 11))
+                                Text("Oscuro")
+                                    .font(.system(size: 11, weight: .medium))
+                            }
+                            .foregroundColor(theme.isDark ? .black : Theme.textSecondary)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 7)
+                            .background(Rectangle().fill(theme.isDark ? Theme.accent : Theme.buttonBg))
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            if theme.isDark { theme.toggle() }
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "sun.max.fill")
+                                    .font(.system(size: 11))
+                                Text("Claro")
+                                    .font(.system(size: 11, weight: .medium))
+                            }
+                            .foregroundColor(!theme.isDark ? .black : Theme.textSecondary)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 7)
+                            .background(Rectangle().fill(!theme.isDark ? Theme.accent : Theme.buttonBg))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+
+            Text("El modo claro adapta el fondo y el texto automaticamente. Los colores de acento, LED y waveform no cambian.")
+                .font(.system(size: 10))
+                .foregroundColor(Theme.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     // MARK: Licencia
@@ -1135,7 +1242,7 @@ struct OutputsView: View {
                 .font(.system(size: 12))
                 .foregroundColor(Theme.textSecondary)
                 .padding(7)
-                .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.06)))
+                .background(RoundedRectangle(cornerRadius: 6).fill(Theme.overlay(0.06)))
         }
         .buttonStyle(.plain)
         .help("Actualizar lista de dispositivos de audio")

@@ -50,6 +50,7 @@ public final class StageLinqManager: ObservableObject {
 
     public func start() {
         bookkeepingQueue.sync { stoppedFlag = false }
+        log("StageLinq: arranque · \(NetworkInfo.lanIfacesLog()) · \(NetworkInfo.announceFromLog())")
         netQueue.async { [weak self] in self?.runDiscoveryListener() }
         netQueue.async { [weak self] in self?.runAnnounce() }
         netQueue.async { [weak self] in self?.runStalePrune() }
@@ -70,7 +71,7 @@ public final class StageLinqManager: ObservableObject {
             let socket = try UDPSocket(listenPort: StageLinq.listenPort, reuse: .shared)
             udpListener = socket
             DispatchQueue.main.async { self.listenWarning = "" }
-            log("StageLinq: escuchando HOWDY en UDP :\(StageLinq.listenPort) (0.0.0.0)")
+            log("StageLinq: bind UDP :\(StageLinq.listenPort) OK (0.0.0.0, REUSEADDR, sin REUSEPORT)")
 
             while !stopped {
                 guard let (data, ip) = socket.receive() else { continue }
@@ -122,12 +123,25 @@ public final class StageLinqManager: ObservableObject {
 
     private func runAnnounce() {
         let packet = identityPacket()
-        guard let sock = try? UDPSocket(listenPort: nil) else {
+        var lan = NetworkInfo.preferredLAN()
+        guard var sock = (try? UDPSocket.boundToLAN(lan)) ?? (try? UDPSocket(listenPort: nil)) else {
             log("[WARN] No se pudo crear el socket de anuncio")
             return
         }
         log("StageLinq: identidad \(StageLinq.identityName)/\(StageLinq.identitySource) v\(StageLinq.identityVersion) · broadcast :\(StageLinq.listenPort) + unicast a SC6000 de LAN")
+        if lan.isValid {
+            log(NetworkInfo.announceFromLog())
+        }
         while !stopped {
+            let next = NetworkInfo.preferredLAN()
+            if next != lan {
+                sock.close()
+                lan = next
+                if let rebound = try? UDPSocket.boundToLAN(lan) {
+                    sock = rebound
+                }
+                if lan.isValid { log(NetworkInfo.announceFromLog()) }
+            }
             sock.send(packet, to: "255.255.255.255", port: StageLinq.listenPort)
 
             let peers = lanUnicastPeers()
@@ -138,7 +152,13 @@ public final class StageLinqManager: ObservableObject {
             var sentIPs = Set<String>()
             for peer in peers {
                 if !sentIPs.insert(peer.ip).inserted { continue }
-                sock.send(packet, to: peer.ip, port: StageLinq.listenPort)
+                let peerLAN = NetworkInfo.lanAddress(reaching: peer.ip)
+                if peerLAN.isValid, peerLAN.ip != lan.ip, let bound = try? UDPSocket.boundToLAN(peerLAN) {
+                    bound.send(packet, to: peer.ip, port: StageLinq.listenPort)
+                    bound.close()
+                } else {
+                    sock.send(packet, to: peer.ip, port: StageLinq.listenPort)
+                }
                 let first: Bool = bookkeepingQueue.sync {
                     if loggedUnicastPeers.contains(peer.ip) { return false }
                     loggedUnicastPeers.insert(peer.ip)
@@ -209,8 +229,14 @@ public final class StageLinqManager: ObservableObject {
         while !stopped {
             Thread.sleep(forTimeInterval: 1.0)
             let now = Date()
+            // 20 s: un SC6000 real puede perder HOWDY en Wi‑Fi sin estar apagado.
+            // TCP conectado cuenta como vivo aunque el UDP llegue tarde.
             let stale: [StageLinqDevice] = bookkeepingQueue.sync {
-                devicesByKey.values.filter { now.timeIntervalSince($0.lastSeen) > 8.0 }
+                devicesByKey.values.filter { device in
+                    guard now.timeIntervalSince(device.lastSeen) > 20.0 else { return false }
+                    if device.connectionState == .connected { return false }
+                    return true
+                }
             }
             for device in stale {
                 forget(device, reason: "sin anuncio")

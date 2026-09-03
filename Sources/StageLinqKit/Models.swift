@@ -111,9 +111,10 @@ public final class StageLinqDevice: ObservableObject, Identifiable {
     public static func isDenonSimulatorName(_ raw: String) -> Bool {
         let u = raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         if u.isEmpty { return false }
+        // Exacto. `contains("SIM")` / `hasPrefix("SC6000-SIM")` marcarían
+        // un SC6000 real llamado p. ej. «SC6000-SIMON».
         if u == "SC6000-SIM" || u == "SC6000 TEST" || u == "SC6000TEST" { return true }
-        if u.hasPrefix("SC6000-SIM") { return true }
-        if u.hasPrefix("STAGE CONNECT TEST") { return true }
+        if u == "STAGE CONNECT TEST" { return true }
         return false
     }
 }

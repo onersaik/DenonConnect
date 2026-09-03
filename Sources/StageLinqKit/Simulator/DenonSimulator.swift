@@ -186,7 +186,8 @@ public final class DenonSimulator {
     // MARK: - Anuncio por UDP
 
     private func runAnnounce() {
-        guard let sock = try? UDPSocket(listenPort: nil) else {
+        let lan = NetworkInfo.preferredLAN()
+        guard let sock = (try? UDPSocket.boundToLAN(lan)) ?? (try? UDPSocket(listenPort: nil)) else {
             log("[AVISO] Denon: no se pudo crear el socket de anuncio")
             return
         }

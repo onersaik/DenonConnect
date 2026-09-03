@@ -6,16 +6,18 @@ import StageLinqKit
 
 @main
 struct SC6000ConnectApp: App {
-    @StateObject private var manager = StageLinqManager()
-    @StateObject private var proDJLink = ProDJLinkManager()
-    @StateObject private var outputs = OutputController()
-    @StateObject private var artwork = ArtworkFetcher()
-    @StateObject private var testLink = TestLinkReceiver()
-    @StateObject private var license = LicenseStore()
-    @StateObject private var mapping = MappingController()
-    @StateObject private var software = SoftwareDJManager()
-    @StateObject private var labels = DeckLabelStore()
-    @StateObject private var tracklist = TracklistStore()
+    @StateObject private var manager    = StageLinqManager()
+    @StateObject private var proDJLink  = ProDJLinkManager()
+    @StateObject private var outputs    = OutputController()
+    @StateObject private var artwork    = ArtworkFetcher()
+    @StateObject private var testLink   = TestLinkReceiver()
+    @StateObject private var license    = LicenseStore()
+    @StateObject private var mapping    = MappingController()
+    @StateObject private var software   = SoftwareDJManager()
+    @StateObject private var labels     = DeckLabelStore()
+    @StateObject private var tracklist  = TracklistStore()
+    @StateObject private var theme      = ThemeStore()
+    @StateObject private var localization = LocalizationStore()
     @State private var servicesStarted = false
 
     var body: some Scene {
@@ -31,8 +33,10 @@ struct SC6000ConnectApp: App {
                 .environmentObject(software)
                 .environmentObject(labels)
                 .environmentObject(tracklist)
+                .environmentObject(theme)
+                .environmentObject(localization)
                 .frame(minWidth: 980, minHeight: 640)
-                .preferredColorScheme(.dark)
+                .preferredColorScheme(theme.isDark ? .dark : .light)
                 .onAppear {
                     license.refresh()
                     if license.isUnlocked { startServices() }
@@ -61,6 +65,8 @@ struct SC6000ConnectApp: App {
                 .environmentObject(labels)
                 .environmentObject(mapping)
                 .environmentObject(artwork)
+                .environmentObject(theme)
+                .environmentObject(localization)
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentMinSize)
@@ -74,6 +80,8 @@ struct SC6000ConnectApp: App {
                 .environmentObject(proDJLink)
                 .environmentObject(testLink)
                 .environmentObject(software)
+                .environmentObject(theme)
+                .environmentObject(localization)
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentMinSize)

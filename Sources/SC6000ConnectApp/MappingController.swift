@@ -18,6 +18,7 @@ enum MappingAction: String, CaseIterable, Identifiable, Codable {
     case modeDenon
     case modePioneer
     case modeDual
+    case modeTodos
     case layoutLarge
     case layoutSmall
     case layoutMaster
@@ -47,7 +48,8 @@ enum MappingAction: String, CaseIterable, Identifiable, Codable {
         case .modeAuto:            return "Modo Auto"
         case .modeDenon:           return "Modo Denon"
         case .modePioneer:         return "Modo Pioneer"
-        case .modeDual:            return "Modo Todos"
+        case .modeDual:            return "Modo Dual"
+        case .modeTodos:           return "Modo Todos"
         case .layoutLarge:         return "Vista CDJ"
         case .layoutSmall:         return "Vista Overview"
         case .layoutMaster:        return "Vista Master"
@@ -74,7 +76,7 @@ enum MappingAction: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .toggleMasterSMPTE, .toggleLTCFollow:
             return "Master"
-        case .modeAuto, .modeDenon, .modePioneer, .modeDual,
+        case .modeAuto, .modeDenon, .modePioneer, .modeDual, .modeTodos,
              .layoutLarge, .layoutSmall, .layoutMaster, .zoomIn, .zoomOut,
              .toggleConfig, .toggleLog:
             return "Vistas"
@@ -92,7 +94,7 @@ enum MappingAction: String, CaseIterable, Identifiable, Codable {
     /// Si true, CC 0 apaga; Note/CC>64 hace toggle (o enciende si ya estaba off).
     var supportsOff: Bool {
         switch self {
-        case .modeAuto, .modeDenon, .modePioneer, .modeDual,
+        case .modeAuto, .modeDenon, .modePioneer, .modeDual, .modeTodos,
              .layoutLarge, .layoutSmall, .layoutMaster, .zoomIn, .zoomOut:
             return false
         default:
@@ -232,8 +234,10 @@ final class MappingController: ObservableObject {
         .modeDenon:          KeyBinding(character: "2", keyCode: 19),
         .modePioneer:        KeyBinding(character: "3", keyCode: 20),
         .modeDual:           KeyBinding(character: "4", keyCode: 21),
+        .modeTodos:          KeyBinding(character: "5", keyCode: 23),
         .layoutLarge:        KeyBinding(character: "g", keyCode: 5),
         .layoutSmall:        KeyBinding(character: "p", keyCode: 35),
+        .layoutMaster:       KeyBinding(character: "v", keyCode: 9),
         .zoomIn:             KeyBinding(character: "=", keyCode: 24),
         .zoomOut:            KeyBinding(character: "-", keyCode: 27),
         .toggleConfig:       KeyBinding(character: "c", keyCode: 8),
@@ -263,6 +267,7 @@ final class MappingController: ObservableObject {
 
     func setVisibleRows(_ ids: [String]) {
         if visibleRowIDs != ids { visibleRowIDs = ids }
+        outputs?.setVisibleDeckIDs(ids)
     }
 
     func start() {
@@ -377,6 +382,7 @@ final class MappingController: ObservableObject {
         case .modeDenon:   mode = .denon
         case .modePioneer: mode = .pioneer
         case .modeDual:    mode = .dual
+        case .modeTodos:   mode = .todos
         case .layoutLarge: layout = .large
         case .layoutSmall: layout = .small
         case .layoutMaster: layout = .master
@@ -564,11 +570,9 @@ final class MappingController: ObservableObject {
         }
 
         if !keyboardEnabled && learning == nil {
-            if event.keyCode == 53 {
-                if showOutputs {
-                    showOutputs = false
-                    return nil
-                }
+            if event.keyCode == 53, showOutputs {
+                showOutputs = false
+                return nil
             }
             return event
         }

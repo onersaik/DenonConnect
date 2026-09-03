@@ -23,6 +23,8 @@ struct WaveformView: View {
     var peaksLow:    [UInt8] = []
     var peaksMid:    [UInt8] = []
     var peaksHigh:   [UInt8] = []
+    /// Segundos reales del playhead (jog / SMPTE). Si falta, se usa progress × duración.
+    var elapsed: Double? = nil
     var cuePositionFraction: Double? = nil
     var extraCueFractions: [Double] = []
     var loopInFraction:  Double? = nil
@@ -66,6 +68,9 @@ struct WaveformView: View {
     // MARK: - Tiempo real de la pista
 
     private var elapsedSeconds: Double {
+        if let e = elapsed, e.isFinite, e >= 0 {
+            return durationSeconds > 0 ? min(e, durationSeconds) : e
+        }
         if let p = progress, let l = trackLength, l > 0, p.isFinite, l.isFinite {
             return min(max(p, 0), 1) * l
         }
@@ -77,7 +82,20 @@ struct WaveformView: View {
         return l > 0 && l.isFinite ? l : 0
     }
 
-    private var hasTimeline: Bool { durationSeconds > 0 && progress != nil }
+    private var progressFraction: Double {
+        if let p = progress, p.isFinite { return min(max(p, 0), 1) }
+        if durationSeconds > 0, let e = elapsed, e.isFinite, e >= 0 {
+            return min(max(e / durationSeconds, 0), 1)
+        }
+        return 0
+    }
+
+    private var hasTimeline: Bool {
+        guard durationSeconds > 0 else { return false }
+        if let p = progress, p.isFinite { return true }
+        if let e = elapsed, e.isFinite, e >= 0 { return true }
+        return false
+    }
 
     private var hasRGB: Bool {
         let n = peaksLow.count
@@ -124,7 +142,7 @@ struct WaveformView: View {
         let cols = max(400, Int(size.width / 0.50))
         let colW = size.width / CGFloat(cols)
         let duration = durationSeconds
-        let prog = hasTimeline ? min(max(progress ?? 0, 0), 1) : 0
+        let prog = hasTimeline ? progressFraction : 0
         let playX = CGFloat(prog) * size.width
         let slice = duration > 0 ? duration / Double(cols) : 0.02
 
@@ -133,6 +151,10 @@ struct WaveformView: View {
             let x2 = CGFloat(loopOut) * size.width
             ctx.fill(Path(CGRect(x: x1, y: 0, width: max(1, x2 - x1), height: size.height)),
                      with: .color(Color.green.opacity(0.16)))
+            ctx.fill(Path(CGRect(x: x1, y: 0, width: 1.5, height: size.height)),
+                     with: .color(Color.green.opacity(0.80)))
+            ctx.fill(Path(CGRect(x: x2 - 1.5, y: 0, width: 1.5, height: size.height)),
+                     with: .color(Color.green.opacity(0.80)))
         }
 
         for i in 0..<cols {

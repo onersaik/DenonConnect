@@ -110,6 +110,8 @@ struct PlayerDeckRow: View {
     let deck: DeckDisplay
     var isLarge: Bool = true
     var isHero: Bool = false
+    /// Vista Master: la onda ocupa el hueco vertical (no un alto fijo).
+    var fillsAvailable: Bool = false
     var isLTCSource: Bool = false
     var isMasterFocus: Bool = false
     var isLocked: Bool = false
@@ -146,33 +148,18 @@ struct PlayerDeckRow: View {
 
             VStack(spacing: 0) {
                 largeMetaRow
-                WaveformView(
-                    progress:    deck.progress,
-                    trackLength: deck.trackLength,
-                    bpm:         deck.bpm,
-                    beatInBar:   deck.beatInBar,
-                    isPlaying:   deck.isPlaying,
-                    accent:      deck.accent,
-                    trackSeed:   deck.trackSeed,
-                    peaks: deck.peaks,
-                    peaksLow: deck.peaksLow,
-                    peaksMid: deck.peaksMid,
-                    peaksHigh: deck.peaksHigh,
-                    cuePositionFraction: deck.cuePositionFraction,
-                    extraCueFractions: deck.extraCueFractions,
-                    loopInFraction:  deck.loopInFraction,
-                    loopOutFraction: deck.loopOutFraction,
-                    mode: .scrolling,
-                    windowSeconds: waveformWindowSeconds
-                )
-                .id(deck.id)
-                .frame(height: isHero ? 148 : 96)
-                .opacity(deck.loaded && (deck.progress != nil || !deck.peaks.isEmpty) ? 1 : 0.28)
-                .transaction { $0.animation = nil }
+                deckWaveform(mode: .scrolling, windowSeconds: waveformWindowSeconds)
+                    .id(deck.id)
+                    .frame(minHeight: fillsAvailable ? 180 : (isHero ? 148 : 96))
+                    .frame(maxHeight: fillsAvailable ? .infinity : (isHero ? 148 : 96))
+                    .opacity(waveformOpacity)
+                    .transaction { $0.animation = nil }
                 if isHero, hasExtendedMeta { largeDetailRow }
                 largeBottomBar
             }
+            .frame(maxHeight: fillsAvailable ? .infinity : nil)
         }
+        .frame(maxHeight: fillsAvailable ? .infinity : nil)
         .background(Theme.deckFill)
         .overlay(alignment: .leading) {
             Rectangle()
@@ -227,8 +214,8 @@ struct PlayerDeckRow: View {
                     .minimumScaleFactor(0.7)
 
                 HStack(spacing: 8) {
-                    if !deck.artist.isEmpty {
-                        Text(deck.artist)
+                    if !artistText.isEmpty {
+                        Text(artistText)
                             .font(.system(size: 11))
                             .foregroundColor(Theme.textSecondary)
                             .lineLimit(1)
@@ -354,7 +341,12 @@ struct PlayerDeckRow: View {
     }
 
     private var displayedTag: String {
-        labels.tag(for: resolvedLabelKey) ?? deck.deckTag
+        let raw = labels.tag(for: resolvedLabelKey) ?? deck.deckTag
+        let u = raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if u == "TEST" || u == "SIM" || u == "SC6000-SIM" || u == "SC6000 TEST" {
+            return deck.deckTag
+        }
+        return raw
     }
 
     private func tagButton(size: CGFloat, width: CGFloat, height: CGFloat) -> some View {
@@ -404,7 +396,7 @@ struct PlayerDeckRow: View {
                     .foregroundColor(Theme.textPrimary)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 4)
-                    .background(Color.white.opacity(0.08))
+                    .background(Theme.overlay(0.08))
                 }
             }
             HStack {
@@ -454,22 +446,22 @@ struct PlayerDeckRow: View {
     }
 
     private var resolvedArtwork: NSImage? {
-        deck.artworkImage ?? artwork.artwork(artist: deck.artist, title: deck.title)
+        ArtworkPixels.displayable(deck.artworkImage)
+            ?? ArtworkPixels.displayable(artwork.artwork(artist: deck.artist, title: deck.title))
     }
 
-    /// Solo si hay píxeles. Sin datos no se reserva hueco (Denon real / iTunes vacío).
+    /// Solo si hay CGImage. Sin píxeles no se reserva hueco (Denon real / iTunes vacío).
     private var showsArtwork: Bool { resolvedArtwork != nil }
 
+    @ViewBuilder
     private func artworkThumb(size: CGFloat) -> some View {
-        Group {
-            if let img = resolvedArtwork {
-                Image(nsImage: img)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: size, height: size)
-                    .clipped()
-                    .overlay(Rectangle().stroke(Theme.rowDivider, lineWidth: 1))
-            }
+        if let img = resolvedArtwork, let cg = ArtworkPixels.cgImage(img) {
+            Image(decorative: cg, scale: 1, orientation: .up)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: size, height: size)
+                .clipped()
+                .overlay(Rectangle().stroke(Theme.rowDivider, lineWidth: 1))
         }
     }
     private var ledTimeDisplay: some View {
@@ -537,7 +529,7 @@ struct PlayerDeckRow: View {
                 .background(Color.black)
                 .overlay(
                     RoundedRectangle(cornerRadius: 2)
-                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                        .stroke(Theme.overlay(0.08), lineWidth: 1)
                 )
         }
     }
@@ -583,7 +575,7 @@ struct PlayerDeckRow: View {
             if let progress = deck.progress {
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
-                        Rectangle().fill(Color.white.opacity(0.08))
+                        Rectangle().fill(Theme.overlay(0.08))
                         Rectangle()
                             .fill(deck.accent)
                             .frame(width: max(3, geo.size.width * progress))
@@ -638,8 +630,8 @@ struct PlayerDeckRow: View {
                         .font(.system(size: 12, weight: .bold))
                         .foregroundColor(deck.loaded ? Theme.ledGreen : Theme.textTertiary)
                         .lineLimit(1)
-                    if !deck.artist.isEmpty {
-                        Text(deck.artist)
+                    if !artistText.isEmpty {
+                        Text(artistText)
                             .font(.system(size: 9))
                             .foregroundColor(Theme.textSecondary)
                             .lineLimit(1)
@@ -676,42 +668,32 @@ struct PlayerDeckRow: View {
                     Text(displayedTimecode)
                         .font(.system(size: 9, weight: .bold, design: .monospaced))
                         .foregroundColor(Theme.accent)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                     Text(keyText)
                         .font(.system(size: 10, weight: .bold, design: .monospaced))
                         .foregroundColor(deck.key.isEmpty ? Theme.textTertiary : Theme.purple)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                     if isLTCSource { LEDTag(text: "LTC", color: Theme.purple) }
-                    lockButton
-                    masterButton
-                    ltcButton
+                    HStack(spacing: 4) {
+                        lockButton
+                        masterButton
+                        ltcButton
+                    }
+                    .layoutPriority(2)
                 }
                 .padding(.trailing, 6)
             }
             .padding(.vertical, 5)
             .background(Theme.deckFill)
 
-            // ── Overview waveform ────────────────────────────────────────
-            WaveformView(
-                progress:            deck.progress,
-                trackLength:         deck.trackLength,
-                bpm:                 deck.bpm,
-                beatInBar:           deck.beatInBar,
-                isPlaying:           deck.isPlaying,
-                accent:              deck.accent,
-                trackSeed:           deck.trackSeed,
-                peaks:               deck.peaks,
-                peaksLow:            deck.peaksLow,
-                peaksMid:            deck.peaksMid,
-                peaksHigh:           deck.peaksHigh,
-                cuePositionFraction: deck.cuePositionFraction,
-                extraCueFractions:   deck.extraCueFractions,
-                loopInFraction:      deck.loopInFraction,
-                loopOutFraction:     deck.loopOutFraction,
-                mode:                .overview
-            )
-            .id(deck.id + "-ov")
-            .frame(height: 68)
-            .opacity(deck.loaded && (deck.progress != nil || !deck.peaks.isEmpty) ? 1 : 0.22)
-            .transaction { $0.animation = nil }
+            // ── Overview: pista entera ────────────────────────────────────
+            deckWaveform(mode: .overview, windowSeconds: waveformWindowSeconds)
+                .id(deck.id + "-ov")
+                .frame(height: 68)
+                .opacity(waveformOpacity)
+                .transaction { $0.animation = nil }
         }
         .background(Theme.deckFill)
         .overlay(alignment: .leading) {
@@ -728,6 +710,43 @@ struct PlayerDeckRow: View {
     // ═══════════════════════════════════════
     // MARK: Componentes compartidos
     // ═══════════════════════════════════════
+
+    private var waveformProgress: Double? {
+        if let p = deck.progress, p.isFinite { return min(max(p, 0), 1) }
+        if let e = deck.elapsed, let l = deck.trackLength, l > 0, e.isFinite {
+            return min(max(e / l, 0), 1)
+        }
+        return nil
+    }
+
+    private var waveformOpacity: Double {
+        let hasPeaks = !deck.peaks.isEmpty || deck.peaksLow.count > 1
+        if deck.loaded && (waveformProgress != nil || hasPeaks) { return 1 }
+        return isLarge ? 0.28 : 0.22
+    }
+
+    private func deckWaveform(mode: WaveformMode, windowSeconds: Double) -> WaveformView {
+        WaveformView(
+            progress:            waveformProgress,
+            trackLength:         deck.trackLength,
+            bpm:                 deck.bpm,
+            beatInBar:           deck.beatInBar,
+            isPlaying:           deck.isPlaying,
+            accent:              deck.accent,
+            trackSeed:           deck.trackSeed,
+            peaks:               deck.peaks,
+            peaksLow:            deck.peaksLow,
+            peaksMid:            deck.peaksMid,
+            peaksHigh:           deck.peaksHigh,
+            elapsed:             deck.elapsed,
+            cuePositionFraction: deck.cuePositionFraction,
+            extraCueFractions:   deck.extraCueFractions,
+            loopInFraction:      deck.loopInFraction,
+            loopOutFraction:     deck.loopOutFraction,
+            mode:                mode,
+            windowSeconds:       windowSeconds
+        )
+    }
 
     private func playStateBadge(compact: Bool) -> some View {
         let playing = deck.isPlaying
@@ -755,16 +774,19 @@ struct PlayerDeckRow: View {
                 Text("LOCK")
                     .font(.system(size: 8, weight: .bold))
                     .tracking(0.3)
+                    .lineLimit(1)
+                    .fixedSize()
             }
             .foregroundColor(isLocked ? .black : Theme.textTertiary)
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
             .background(
                 Rectangle()
-                    .fill(isLocked ? Theme.yellow : Color.white.opacity(0.08))
+                    .fill(isLocked ? Theme.yellow : Theme.buttonBg)
             )
         }
         .buttonStyle(.plain)
+        .fixedSize()
         .help(isLocked
               ? "Salida de este deck anclada. El MASTER de casa no la pisa ni cambia su generador."
               : "Anclar el LTC de esta fila. El MASTER sigue a otro deck en la salida de casa.")
@@ -780,16 +802,19 @@ struct PlayerDeckRow: View {
                 Text("SMPTE")
                     .font(.system(size: 8, weight: .bold))
                     .tracking(0.3)
+                    .lineLimit(1)
+                    .fixedSize()
             }
             .foregroundColor(isLTCSource ? .black : Theme.textTertiary)
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
             .background(
                 Rectangle()
-                    .fill(isLTCSource ? Theme.ledGreen : Color.white.opacity(0.08))
+                    .fill(isLTCSource ? Theme.ledGreen : Theme.buttonBg)
             )
         }
         .buttonStyle(.plain)
+        .fixedSize()
         .help(isLTCSource
               ? "Este deck está emitiendo LTC. Pulsa para detener este generador (no reactiva el Master auto)."
               : "Activar SMPTE LTC de esta pista en la salida asignada a esta fila.")
@@ -803,6 +828,8 @@ struct PlayerDeckRow: View {
                 Text("MST")
                     .font(.system(size: 8, weight: .bold))
                     .tracking(0.3)
+                    .lineLimit(1)
+                    .fixedSize()
             }
             .foregroundColor(isMasterFocus ? .black : Theme.accent.opacity(0.75))
             .padding(.horizontal, 6)
@@ -813,6 +840,7 @@ struct PlayerDeckRow: View {
             )
         }
         .buttonStyle(.plain)
+        .fixedSize()
         .help(isMasterFocus
               ? "Esta es la pista MASTER en monitor. Pulsa de nuevo para seguir al que está sonando."
               : "Mostrar esta pista en grande (vista MASTER). No activa SMPTE.")
@@ -820,8 +848,13 @@ struct PlayerDeckRow: View {
 
     private var titleText: String {
         if !deck.loaded { return "SIN PISTA" }
-        if deck.title.isEmpty { return "SIN TITULO" }
-        return deck.title
+        let title = TrackNaming.cleanTitle(deck.title)
+        if title.isEmpty { return "SIN TITULO" }
+        return title
+    }
+
+    private var artistText: String {
+        TrackNaming.cleanTitle(deck.artist)
     }
 
     private var bpmText: String {
@@ -840,7 +873,7 @@ struct PlayerDeckRow: View {
     }
 
     private func beatColor(_ pos: Int) -> Color {
-        guard deck.beatInBar == pos else { return Color.white.opacity(0.10) }
+        guard deck.beatInBar == pos else { return Color.primary.opacity(0.10) }
         return pos == 1 ? Theme.accent : deck.accent
     }
 
@@ -910,18 +943,18 @@ struct DeckSignalLED: View {
             let now = timeline.date
             let live = now.timeIntervalSince(signalAt) < 0.9
             let flash = now < flashUntil
-            let lit = flash ? Color.white : (live ? Theme.ledGreen : Color.white.opacity(0.12))
+            let lit = flash ? Color.white : (live ? Theme.ledGreen : Theme.overlay(0.12))
             VStack(spacing: compact ? 0 : 2) {
                 ZStack {
                     Capsule()
                         .fill(Color.black)
                         .frame(width: compact ? 9 : 11, height: compact ? 14 : 20)
-                        .overlay(Capsule().stroke(Color.white.opacity(0.14), lineWidth: 1))
+                        .overlay(Capsule().stroke(Theme.overlay(0.14), lineWidth: 1))
                     Capsule()
                         .fill(lit)
                         .frame(width: compact ? 4 : 5, height: compact ? 8 : 12)
                         .shadow(
-                            color: flash ? Color.white.opacity(0.95)
+                            color: flash ? Theme.overlay(0.95)
                                 : (live ? Theme.ledGreen.opacity(0.9) : .clear),
                             radius: flash ? 5 : (live ? 3.5 : 0)
                         )

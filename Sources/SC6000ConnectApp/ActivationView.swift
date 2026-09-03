@@ -30,7 +30,7 @@ struct ActivationView: View {
                     .textFieldStyle(.plain)
                     .font(.system(size: 13, design: .monospaced))
                     .padding(10)
-                    .background(Color.white.opacity(0.06))
+                    .background(Theme.overlay(0.06))
                     .overlay(Rectangle().stroke(Theme.panelBorder, lineWidth: 1))
                     .onSubmit { submit() }
 

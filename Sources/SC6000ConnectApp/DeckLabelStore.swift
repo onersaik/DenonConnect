@@ -23,7 +23,8 @@ final class DeckLabelStore: ObservableObject {
 
     func setTag(_ value: String, for key: String) {
         let t = String(value.trimmingCharacters(in: .whitespacesAndNewlines).prefix(12))
-        if t.isEmpty {
+        let u = t.uppercased()
+        if t.isEmpty || u == "TEST" || u == "SIM" {
             tags.removeValue(forKey: key)
         } else {
             tags[key] = t

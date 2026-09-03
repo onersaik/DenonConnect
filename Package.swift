@@ -7,7 +7,10 @@ let package = Package(
     targets: [
         .target(
             name: "StageLinqKit",
-            path: "Sources/StageLinqKit"
+            path: "Sources/StageLinqKit",
+            linkerSettings: [
+                .linkedFramework("SystemConfiguration")
+            ]
         ),
         .executableTarget(
             name: "SC6000ConnectApp",

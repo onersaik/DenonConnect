@@ -163,13 +163,19 @@ public final class LTCGenerator {
     // MARK: Control
 
     public func seek(toSeconds seconds: Double) {
-        applyPlayhead(seconds: seconds, playing: nil)
+        applyPlayhead(seconds: seconds, playing: nil, force: true)
+    }
+
+    public func currentFrameNumber() -> Int {
+        stateLock.lock(); defer { stateLock.unlock() }
+        return currentFrame
     }
 
     /// El LTC es el playhead de la pista: 0 → 00:00:00:00, seek/jog/cue
     /// clavan el frame en el acto. `playing == false` congela (silencio).
-    /// Solo se reinicia el bitstream en un salto de más de un frame.
-    public func applyPlayhead(seconds: Double, playing: Bool? = nil) {
+    /// En play, el reloj de audio avanza; solo hard-reset si seek, pause/play
+    /// o `force` (fan-out unificando engines desfasados).
+    public func applyPlayhead(seconds: Double, playing: Bool? = nil, force: Bool = false) {
         let safe = seconds.isFinite ? max(0, seconds) : 0
         stateLock.lock()
         let wasPlaying = !paused
@@ -178,9 +184,11 @@ public final class LTCGenerator {
         let frame = Self.frameNumber(seconds: safe, fps: frameRate.rawValue)
         let delta = frame - currentFrame
         let playStateChanged = wasPlaying != nowPlaying
-        // Solo hard-reset en primera carga, cambio play/pause, o salto >2 frames.
-        // Mientras reproduce con delta pequeno, el reloj de audio avanza sin resetear.
-        let hardReset = bitsOfFrame.isEmpty || playStateChanged || abs(delta) > 2
+        // Pausa: cualquier movimiento es jog/seek → clava el frame.
+        // Play: jitter de 1–2 frames no resetea (el AU lleva el reloj).
+        let pausedSeek = !nowPlaying && delta != 0
+        let hardReset = force || bitsOfFrame.isEmpty || playStateChanged
+            || pausedSeek || abs(delta) > 2
         if hardReset {
             playheadSeconds = safe
             currentFrame = max(0, frame)
@@ -420,6 +428,7 @@ public final class LTCGenerator {
 
 /// Un único playhead/pause/seek alimenta N `LTCGenerator` (un engine por salida).
 /// El mismo bitstream en dos devices es correcto. Apagar = stop de todos.
+/// Si un AU se desfasó, el tick unifica seek en todos los engines de esta fuente.
 public final class LTCFanout {
 
     public let name: String
@@ -445,6 +454,7 @@ public final class LTCFanout {
     public func start(deviceIDs: [AudioDeviceID], playhead: Double?, playing: Bool) throws {
         stop()
         let unique = Self.uniqueIDs(deviceIDs)
+        let head = Self.clampedPlayhead(playhead)
         var started: [LTCGenerator] = []
         do {
             for (i, id) in unique.enumerated() {
@@ -453,21 +463,21 @@ public final class LTCFanout {
                 gen.frameRate = frameRate
                 gen.level = level
                 gen.outputDeviceID = id == 0 ? nil : id
-                if let playhead, playhead.isFinite, playhead >= 0 {
-                    gen.applyPlayhead(seconds: playhead, playing: false)
-                }
+                // Primer frame = posición real (0 → 00:00:00:00), no un reloj de pared.
+                gen.applyPlayhead(seconds: head, playing: false, force: true)
                 try gen.start()
-                if let playhead, playhead.isFinite, playhead >= 0 {
-                    gen.applyPlayhead(seconds: playhead, playing: playing)
-                }
+                gen.applyPlayhead(seconds: head, playing: playing, force: true)
                 started.append(gen)
             }
             gens = started
             if unique.count > 1 {
-                log("SMPTE LTC [\(name)] × \(unique.count) salidas")
+                log("SMPTE LTC [\(name)] × \(unique.count) salidas — mismo playhead")
             }
         } catch {
-            started.forEach { $0.stop() }
+            started.forEach {
+                $0.setPaused(true)
+                $0.stop()
+            }
             throw error
         }
     }
@@ -480,14 +490,49 @@ public final class LTCFanout {
         gens.removeAll()
     }
 
+    /// Mismo seek/pause/play en todos los engines. Si uno se desfasó, unifica.
     public func applyPlayhead(seconds: Double, playing: Bool) {
+        let head = Self.clampedPlayhead(seconds)
+        let unify = needsUnify(targetSeconds: head)
         for gen in gens {
-            gen.applyPlayhead(seconds: seconds, playing: playing)
+            gen.applyPlayhead(seconds: head, playing: playing, force: unify)
         }
     }
 
     public func setPaused(_ value: Bool) {
         gens.forEach { $0.setPaused(value) }
+    }
+
+    /// 0 si no hay playhead: el primer frame es 00:00:00:00, no un TC inventado.
+    public static func clampedPlayhead(_ seconds: Double?) -> Double {
+        guard let seconds, seconds.isFinite else { return 0 }
+        return max(0, seconds)
+    }
+
+    /// Engines del mismo fan-out: mismo frame. Un AU atrasado arrastra a todos.
+    func needsUnify(targetSeconds: Double) -> Bool {
+        guard gens.count > 1 else { return false }
+        let fps = frameRate.rawValue > 0 ? frameRate.rawValue : 25
+        let targetFrame = LTCGenerator.frameNumber(seconds: targetSeconds, fps: fps)
+        let frameSlack = 2
+        let timeSlack = 2.0 / fps
+        var minF = Int.max
+        var maxF = Int.min
+        var minT = Double.greatestFiniteMagnitude
+        var maxT = -Double.greatestFiniteMagnitude
+        for gen in gens {
+            let t = gen.currentPositionSeconds()
+            let f = gen.currentFrameNumber()
+            minF = min(minF, f)
+            maxF = max(maxF, f)
+            minT = min(minT, t)
+            maxT = max(maxT, t)
+            if abs(f - targetFrame) > frameSlack { return true }
+            if abs(t - targetSeconds) > timeSlack { return true }
+        }
+        if maxF - minF > 1 { return true }
+        if maxT - minT > (1.5 / fps) { return true }
+        return false
     }
 
     public static func uniqueIDs(_ ids: [AudioDeviceID]) -> [AudioDeviceID] {

@@ -407,8 +407,8 @@ struct MonitorWindowView: View {
         let bpm = line?.display.bpm ?? 0
 
         return HStack(alignment: .center, spacing: compact ? 12 : 18) {
-            if showArtwork, let img = resolvedArtwork(line) {
-                Image(nsImage: img)
+            if showArtwork, let img = resolvedArtwork(line), let cg = ArtworkPixels.cgImage(img) {
+                Image(decorative: cg, scale: 1, orientation: .up)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
                     .frame(width: compact ? 44 : 72, height: compact ? 44 : 72)
@@ -598,6 +598,7 @@ struct MonitorWindowView: View {
             peaksLow: d.peaksLow,
             peaksMid: d.peaksMid,
             peaksHigh: d.peaksHigh,
+            elapsed: d.elapsed,
             cuePositionFraction: d.cuePositionFraction,
             extraCueFractions: d.extraCueFractions,
             loopInFraction: d.loopInFraction,
@@ -609,7 +610,7 @@ struct MonitorWindowView: View {
         )
         .id(d.id + (mode == .overview ? "-ov" : "-cdj"))
         .frame(height: height)
-        .opacity(d.loaded && (d.progress != nil || !d.peaks.isEmpty) ? 1 : 0.28)
+        .opacity(d.loaded && (d.progress != nil || d.elapsed != nil || !d.peaks.isEmpty || d.peaksLow.count > 1) ? 1 : 0.28)
         .transaction { $0.animation = nil }
     }
 
@@ -653,8 +654,8 @@ struct MonitorWindowView: View {
 
     private func resolvedArtwork(_ line: MonitorLine?) -> NSImage? {
         guard let line else { return nil }
-        if let img = line.display.artworkImage { return img }
-        return artwork.artwork(artist: line.display.artist, title: line.display.title)
+        return ArtworkPixels.displayable(line.display.artworkImage)
+            ?? ArtworkPixels.displayable(artwork.artwork(artist: line.display.artist, title: line.display.title))
     }
 
     private func toggleFullscreen() {

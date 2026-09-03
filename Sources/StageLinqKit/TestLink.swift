@@ -13,13 +13,24 @@ public enum TrackNaming {
     /// No es un editor de regex: reglas fijas y conservadoras.
     public static func cleanTitle(_ raw: String) -> String {
         var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if s.hasPrefix("file:") {
+            s = URL(string: s)?.path ?? s
+        }
+        if s.contains("/tmp/") || s.contains("/var/folders/")
+            || s.contains("/TemporaryItems") || s.hasPrefix("/") || s.contains("\\") {
+            s = URL(fileURLWithPath: s).deletingPathExtension().lastPathComponent
+        }
         if let r = s.range(of: #"^stage-connect-test-[0-9A-Fa-f-]{36}-"#, options: .regularExpression) {
             s.removeSubrange(r)
         }
-        if s.lowercased().hasPrefix("sct-"), s.count > 40 {
-            if let idx = s.lastIndex(of: "-") {
-                let rest = String(s[s.index(after: idx)...])
-                if !rest.isEmpty { s = rest }
+        if s.lowercased().hasPrefix("sct-") {
+            let rest = String(s.dropFirst(4))
+            if rest.range(of: #"^[0-9A-Fa-f-]{36}"#, options: .regularExpression) != nil {
+                return ""
+            }
+            if s.count > 40, let idx = s.lastIndex(of: "-") {
+                let tail = String(s[s.index(after: idx)...])
+                if !tail.isEmpty { s = tail }
             }
         }
         let lower = s.lowercased()
@@ -86,7 +97,7 @@ public struct TestLinkDeck: Codable, Equatable, Sendable {
     /// JPEG/PNG extraído del archivo en TEST (ruta local). Vacío = sin portada de archivo.
     public var artworkPath: String
     /// Miniatura JPEG base64 acotada. STAGE CONNECT la pinta si la ruta no se lee.
-    public static let maxArtworkJPEGChars = 4000
+    public static let maxArtworkJPEGChars = 6000
     public var artworkJPEG: String
     /// Cues en segundos (pads Q1… del simulador). Vacío = sin cues.
     public var cues: [Double]
@@ -112,7 +123,7 @@ public struct TestLinkDeck: Codable, Equatable, Sendable {
                 cues: [Double] = [], loopIn: Double = -1, loopOut: Double = -1,
                 pitch: Double = 0, isSync: Bool = false) {
         self.title = TrackNaming.cleanTitle(title)
-        self.artist = artist
+        self.artist = TrackNaming.cleanTitle(artist)
         self.bpm = bpm
         self.playing = playing
         self.position = position
@@ -124,8 +135,8 @@ public struct TestLinkDeck: Codable, Equatable, Sendable {
         self.isMaster = isMaster
         self.key = key
         self.genre = genre
-        self.album = album
-        self.comment = comment
+        self.album = TrackNaming.cleanTitle(album)
+        self.comment = TrackNaming.cleanTitle(comment)
         self.artworkPath = artworkPath
         self.artworkJPEG = artworkJPEG
         self.cues = cues
@@ -139,7 +150,7 @@ public struct TestLinkDeck: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         title = TrackNaming.cleanTitle(try c.decodeIfPresent(String.self, forKey: .title) ?? "")
-        artist = try c.decodeIfPresent(String.self, forKey: .artist) ?? ""
+        artist = TrackNaming.cleanTitle(try c.decodeIfPresent(String.self, forKey: .artist) ?? "")
         bpm = try c.decodeIfPresent(Double.self, forKey: .bpm) ?? 0
         playing = try c.decodeIfPresent(Bool.self, forKey: .playing) ?? false
         position = try c.decodeIfPresent(Double.self, forKey: .position) ?? 0
@@ -148,8 +159,8 @@ public struct TestLinkDeck: Codable, Equatable, Sendable {
         isMaster = try c.decodeIfPresent(Bool.self, forKey: .isMaster) ?? false
         key = try c.decodeIfPresent(String.self, forKey: .key) ?? ""
         genre = try c.decodeIfPresent(String.self, forKey: .genre) ?? ""
-        album = try c.decodeIfPresent(String.self, forKey: .album) ?? ""
-        comment = try c.decodeIfPresent(String.self, forKey: .comment) ?? ""
+        album = TrackNaming.cleanTitle(try c.decodeIfPresent(String.self, forKey: .album) ?? "")
+        comment = TrackNaming.cleanTitle(try c.decodeIfPresent(String.self, forKey: .comment) ?? "")
         artworkPath = try c.decodeIfPresent(String.self, forKey: .artworkPath) ?? ""
         artworkJPEG = try c.decodeIfPresent(String.self, forKey: .artworkJPEG) ?? ""
         cues = try c.decodeIfPresent([Double].self, forKey: .cues) ?? []
@@ -189,7 +200,7 @@ public struct TestLinkDeck: Codable, Equatable, Sendable {
         try c.encode(genre, forKey: .genre)
         try c.encode(album, forKey: .album)
         try c.encode(comment, forKey: .comment)
-        if !artworkPath.isEmpty {
+        if !artworkPath.isEmpty, !StageConnectArtworkStore.isEphemeral(artworkPath) {
             try c.encode(artworkPath, forKey: .artworkPath)
         }
         if !artworkJPEG.isEmpty {
@@ -381,15 +392,25 @@ public struct TestLinkSnapshot: Codable, Equatable, Sendable {
     }
 }
 
-/// Ruta compartida TEST → STAGE CONNECT. No /tmp: el .app a menudo no lo lee.
+/// Ruta compartida TEST → STAGE CONNECT. Nunca /tmp: el .app no lo lee y no va a la UI.
 public enum StageConnectArtworkStore {
+    public static func isEphemeral(_ path: String) -> Bool {
+        let p = path.lowercased()
+        if p.contains("/tmp/") || p.contains("/var/folders/") || p.contains("/temporaryitems") {
+            return true
+        }
+        let tmp = NSTemporaryDirectory().lowercased()
+        return !tmp.isEmpty && p.hasPrefix(tmp)
+    }
+
     public static func writableDirectory() -> URL {
         let fm = FileManager.default
-        var dirs: [URL] = []
+        var dirs: [URL] = [
+            URL(fileURLWithPath: "/Users/Shared/STAGE CONNECT/art", isDirectory: true)
+        ]
         if let app = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
             dirs.append(app.appendingPathComponent("STAGE CONNECT/art", isDirectory: true))
         }
-        dirs.append(URL(fileURLWithPath: "/Users/Shared/STAGE CONNECT/art", isDirectory: true))
         for dir in dirs {
             try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
             let probe = dir.appendingPathComponent(".w")
@@ -398,10 +419,16 @@ public enum StageConnectArtworkStore {
                 return dir
             }
         }
-        let fallback = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-            .appendingPathComponent("stage-connect-art", isDirectory: true)
+        let fallback = URL(fileURLWithPath: "/Users/Shared/STAGE CONNECT/art", isDirectory: true)
         try? fm.createDirectory(at: fallback, withIntermediateDirectories: true)
         return fallback
+    }
+
+    /// Nil si solo hay tmp: el receptor no puede leer esa ruta.
+    public static func publishedFileURL(named name: String) -> URL? {
+        let dir = writableDirectory()
+        if isEphemeral(dir.path) { return nil }
+        return dir.appendingPathComponent(name)
     }
 }
 
@@ -572,6 +599,7 @@ public final class TestLinkReceiver: ObservableObject {
                         }
                     }
                     frame.decks[i].title = TrackNaming.cleanTitle(frame.decks[i].title)
+                    frame.decks[i].artist = TrackNaming.cleanTitle(frame.decks[i].artist)
                     let title = frame.decks[i].title
                     if frame.decks[i].bpm > 0 {
                         lastBPM[i] = frame.decks[i].bpm

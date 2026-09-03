@@ -31,10 +31,11 @@ public enum SocketError: Error, CustomStringConvertible {
 }
 
 /// Cómo compartir el puerto UDP.
-/// - `shared`: descubrimiento (50000, 51337). REUSEADDR+REUSEPORT para convivir
-///   con rekordbox u otra app. Los anuncios van por broadcast.
-/// - `unicast`: estado/beats (50001, 50002). Sin REUSEPORT: en Darwin reparte
-///   datagramas entre sockets y se pierden CDJs reales.
+/// - `shared`: descubrimiento (50000, 51337). SO_REUSEADDR para convivir
+///   con rekordbox u otra app. SIN SO_REUSEPORT: en Darwin reparte
+///   datagramas entre sockets y se pierden SC6000/CDJ reales.
+/// - `unicast`: estado/beats (50001, 50002). Bind exclusivo (ni REUSEADDR
+///   ni REUSEPORT). Si el puerto está ocupado, el bind falla con aviso claro.
 public enum UDPBindReuse {
     case shared
     case unicast
@@ -71,16 +72,20 @@ private func lastErrnoString() -> String {
 public final class UDPSocket {
     private let fd: Int32
 
-    public init(listenPort: UInt16?, reuse: UDPBindReuse = .shared) throws {
+    /// `bindIPv4` / `interfaceName`: anuncio LAN. Sin esto, con VPN el kernel
+    /// elige utun y el HOWDY/keepalive salen con una IP que el CDJ no alcanza.
+    public init(
+        listenPort: UInt16?,
+        reuse: UDPBindReuse = .shared,
+        bindIPv4: [UInt8]? = nil,
+        interfaceName: String? = nil
+    ) throws {
         fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
         guard fd >= 0 else { throw SocketError.creationFailed(lastErrnoString()) }
 
-        var reuseAddr: Int32 = 1
-        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuseAddr, socklen_t(MemoryLayout<Int32>.size))
         if reuse == .shared {
-            #if canImport(Darwin)
-            setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &reuseAddr, socklen_t(MemoryLayout<Int32>.size))
-            #endif
+            var reuseAddr: Int32 = 1
+            setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuseAddr, socklen_t(MemoryLayout<Int32>.size))
         }
         var broadcastEnable: Int32 = 1
         setsockopt(fd, SOL_SOCKET, SO_BROADCAST, &broadcastEnable, socklen_t(MemoryLayout<Int32>.size))
@@ -89,12 +94,27 @@ public final class UDPSocket {
         setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &bufBytes, socklen_t(MemoryLayout<Int32>.size))
         setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &bufBytes, socklen_t(MemoryLayout<Int32>.size))
 
-        if let port = listenPort {
+        #if canImport(Darwin)
+        if let name = interfaceName, !name.isEmpty {
+            let idx = if_nametoindex(name)
+            if idx > 0 {
+                var ifindex = idx
+                setsockopt(fd, IPPROTO_IP, IP_BOUND_IF, &ifindex, socklen_t(MemoryLayout<UInt32>.size))
+            }
+        }
+        #endif
+
+        let lanIP = bindIPv4.flatMap { ip -> in_addr_t? in
+            guard ip.count == 4, ip != [0, 0, 0, 0] else { return nil }
+            return in_addr_t(ip[0]) | in_addr_t(ip[1]) << 8 | in_addr_t(ip[2]) << 16 | in_addr_t(ip[3]) << 24
+        }
+
+        if listenPort != nil || lanIP != nil {
             var addr = sockaddr_in()
             addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
             addr.sin_family = sa_family_t(AF_INET)
-            addr.sin_port = port.bigEndian
-            addr.sin_addr.s_addr = INADDR_ANY
+            addr.sin_port = (listenPort ?? 0).bigEndian
+            addr.sin_addr.s_addr = lanIP ?? INADDR_ANY
             let result = withUnsafePointer(to: &addr) { ptr -> Int32 in
                 ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                     bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
@@ -105,13 +125,24 @@ public final class UDPSocket {
                 // Darwin. explícito: sin él resolvería al método close() de esta clase.
                 Darwin.close(fd)
                 let sys = String(cString: strerror(err))
-                throw SocketError.bindFailed("\(sys). \(ListenPortReport.hint(for: port))")
+                let hint = listenPort.map { ListenPortReport.hint(for: $0) } ?? ""
+                throw SocketError.bindFailed(hint.isEmpty ? sys : "\(sys). \(hint)")
             }
         }
 
         // Timeout de lectura para poder revisar cancelación periódicamente.
         var tv = timeval(tv_sec: 1, tv_usec: 0)
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+    }
+
+    /// Socket de anuncio atado a la LAN (IP + iface). Evita que HOWDY/keepalive
+    /// salgan por utun cuando hay VPN.
+    public static func boundToLAN(_ lan: LANAddress) throws -> UDPSocket {
+        try UDPSocket(
+            listenPort: nil,
+            bindIPv4: lan.isValid ? lan.ip : nil,
+            interfaceName: lan.interface.isEmpty ? nil : lan.interface
+        )
     }
 
     public func send(_ data: Data, to host: String, port: UInt16) {
