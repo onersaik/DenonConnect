@@ -125,11 +125,11 @@ public final class WebServer {
         log("[Web] Servidor detenido")
     }
 
-    // MARK: SSE timer (250 ms = 4 fps tiempo real)
+    // MARK: SSE timer (100 ms = 10 fps tiempo real)
 
     private func startPushTimer() {
         let t = DispatchSource.makeTimerSource(queue: queue)
-        t.schedule(deadline: .now() + 0.5, repeating: .milliseconds(250))
+        t.schedule(deadline: .now() + 0.2, repeating: .milliseconds(100))
         t.setEventHandler { [weak self] in self?.broadcastLive() }
         t.resume()
         pushTimer = t
