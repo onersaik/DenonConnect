@@ -193,10 +193,14 @@ public final class LTCGenerator {
         let delta = frame - currentFrame
         let playStateChanged = wasPlaying != nowPlaying
         // Pausa: cualquier movimiento es jog/seek → clava el frame.
-        // Play: jitter de 1–2 frames no resetea (el AU lleva el reloj).
+        // Play: una pequeña desviación no resetea el flujo de bits (eso es
+        // lo que sonaba a "saltos" — cada hard-reset reinicia la fase del
+        // tono LTC a medio bit, un click audible). Solo se resetea con un
+        // desfase grande de verdad (seek/cue real), no por el jitter normal
+        // entre la posición interpolada y el reloj de audio.
         let pausedSeek = !nowPlaying && delta != 0
         let hardReset = force || bitsOfFrame.isEmpty || playStateChanged
-            || pausedSeek || abs(delta) > 2
+            || pausedSeek || abs(delta) > 6
         if hardReset {
             playheadSeconds = safe
             currentFrame = max(0, frame)
@@ -205,16 +209,17 @@ public final class LTCGenerator {
             rateRefSeconds = safe
             if rateHint == nil { playbackRate = 1.0 }
         }
-        // Velocidad del tono LTC: si el protocolo manda el pitch/vari-speed
-        // real (StageLinq /Speed, Pro DJ Link % pitch) se usa tal cual — es
-        // la fuente fiable, no tiene el "diente de sierra" que produce medir
-        // por diferencia entre dos lecturas de una posición ya interpolada
-        // (que avanza de mas y se corrige hacia atras en cada paquete real,
-        // lo que antes hacia sonar el SMPTE "loco"). Sin pitch real (p.ej.
-        // el simulador TestLink) se cae a estimarlo por diferencia de
-        // posicion, con suavizado para no heredar ese mismo ruido.
+        // Velocidad del tono LTC: el protocolo manda el pitch/vari-speed
+        // real (StageLinq /Speed, Pro DJ Link % pitch), pero esa lectura
+        // incluye el ruido normal de tocar el jog wheel o pequeños ajustes
+        // de beatgrid, no solo el fader de pitch — usarla en crudo produce
+        // saltos audibles de velocidad. Se suaviza igual que la estimación
+        // por diferencia, para que un cambio real de pitch se note enseguida
+        // pero un jitter de 1 frame no.
+        let smoothing = 0.82
         if let hint = rateHint, hint.isFinite, hint > 0 {
-            playbackRate = min(4.0, max(-4.0, hint))
+            let clamped = min(4.0, max(-4.0, hint))
+            playbackRate = playbackRate * smoothing + clamped * (1 - smoothing)
         } else if nowPlaying, !hardReset {
             let dtWall = now - rateRefWallClock
             let dtSeconds = safe - rateRefSeconds
@@ -222,7 +227,7 @@ public final class LTCGenerator {
                 let measured = dtSeconds / dtWall
                 if measured.isFinite {
                     let clamped = min(4.0, max(-4.0, measured))
-                    playbackRate = playbackRate * 0.7 + clamped * 0.3
+                    playbackRate = playbackRate * smoothing + clamped * (1 - smoothing)
                 }
                 rateRefWallClock = now
                 rateRefSeconds = safe
