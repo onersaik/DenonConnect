@@ -146,7 +146,7 @@ struct MonitorRootView: View {
                 chrome
                 if client.mini { miniBody } else { tcBody }
                 HStack {
-                    Text("entikrecords.com")
+                    Text("ENTIK MEDIA")
                         .font(.system(size: 10, weight: .semibold))
                         .tracking(1.0)
                         .foregroundColor(.white.opacity(0.28))

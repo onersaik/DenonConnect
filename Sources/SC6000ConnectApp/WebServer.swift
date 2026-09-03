@@ -125,11 +125,11 @@ public final class WebServer {
         log("[Web] Servidor detenido")
     }
 
-    // MARK: SSE timer (100 ms = 10 fps tiempo real)
+    // MARK: SSE timer (50 ms = 20 fps tiempo real)
 
     private func startPushTimer() {
         let t = DispatchSource.makeTimerSource(queue: queue)
-        t.schedule(deadline: .now() + 0.2, repeating: .milliseconds(100))
+        t.schedule(deadline: .now() + 0.1, repeating: .milliseconds(50))
         t.setEventHandler { [weak self] in self?.broadcastLive() }
         t.resume()
         pushTimer = t
@@ -375,13 +375,13 @@ public final class WebServer {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="theme-color" content="#07070c">
+<meta name="theme-color" content="#000000">
 <title>STAGE CONNECT · Monitor</title>
 <style>
 :root{
-  --bg:#07070c;--panel:#101018;--strip:#0c0c12;--elev:#15151f;
-  --border:rgba(255,255,255,.08);--accent:#f57a18;--green:#00e676;
-  --yellow:#ffd54f;--red:#ff4060;--text:#ececf4;--muted:#7a7a92;--dim:#2e2e40;
+  --bg:#000000;--panel:#0a0a0b;--strip:#080809;--elev:#141414;
+  --border:rgba(255,255,255,.08);--accent:#ff7a17;--green:#61ff7a;
+  --yellow:#fac74d;--red:#f25252;--text:#ffffff;--muted:#949494;--dim:#575757;
   --safe-b:env(safe-area-inset-bottom,0px);--safe-t:env(safe-area-inset-top,0px);
   --mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
   --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
@@ -390,8 +390,8 @@ public final class WebServer {
 html,body{height:100%}
 body{
   background:
-    radial-gradient(1200px 600px at 10% -10%,rgba(245,122,24,.12),transparent 55%),
-    radial-gradient(900px 500px at 100% 0%,rgba(0,230,118,.06),transparent 50%),
+    radial-gradient(1200px 600px at 10% -10%,rgba(255,122,23,.12),transparent 55%),
+    radial-gradient(900px 500px at 100% 0%,rgba(97,255,122,.06),transparent 50%),
     var(--bg);
   color:var(--text);font-family:var(--sans);
   min-height:100dvh;display:flex;flex-direction:column;
@@ -405,7 +405,7 @@ body{
 }
 .brand{font-size:12px;font-weight:800;letter-spacing:2.2px;color:var(--accent)}
 .live{display:inline-flex;align-items:center;gap:6px;font-size:10px;font-weight:700;letter-spacing:.8px;color:var(--green)}
-.dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 10px rgba(0,230,118,.55);animation:pulse 1.4s ease-in-out infinite}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 10px rgba(97,255,122,.55);animation:pulse 1.4s ease-in-out infinite}
 .dot.off{background:var(--muted);box-shadow:none;animation:none}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
 .tc-master{margin-left:auto;font:800 clamp(22px,5vw,34px)/1 var(--mono);letter-spacing:1px;color:var(--green)}
@@ -432,8 +432,8 @@ body{
   border:1px solid var(--border);border-radius:10px;overflow:hidden;
   box-shadow:0 10px 30px rgba(0,0,0,.28);
 }
-.deck.playing{border-color:rgba(245,122,24,.5)}
-.deck.master{border-color:rgba(0,230,118,.45)}
+.deck.playing{border-color:rgba(255,122,23,.5)}
+.deck.master{border-color:rgba(97,255,122,.45)}
 .deck-inner{padding:14px}
 .label{font-size:9px;font-weight:800;letter-spacing:1.3px;color:var(--muted);margin-bottom:8px}
 .row{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
@@ -446,9 +446,9 @@ body{
 .badge.master{background:var(--green);color:#000}
 .badge.air{background:var(--red);color:#000}
 .badge.ltc{background:var(--accent);color:#000}
-.badge.play{color:var(--green);background:rgba(0,230,118,.12)}
+.badge.play{color:var(--green);background:rgba(97,255,122,.12)}
 .badge.pause{color:var(--muted);background:rgba(255,255,255,.06)}
-.wave-wrap{position:relative;height:56px;margin-top:12px;background:#000;border-radius:6px;overflow:hidden}
+.wave-wrap{position:relative;height:56px;margin-top:12px;background:#040405;border-radius:6px;overflow:hidden}
 .wave-wrap canvas{width:100%;height:100%;display:block}
 .playhead{position:absolute;top:0;bottom:0;width:2px;background:#fff;left:50%;transform:translateX(-50%);box-shadow:0 0 8px rgba(255,255,255,.45);pointer-events:none}
 .beats{display:flex;gap:3px;margin-top:10px}
@@ -459,7 +459,7 @@ body{
 .meta .el{color:var(--text)}
 .empty{text-align:center;padding:64px 20px;color:var(--muted);font-size:14px;line-height:1.65}
 .master-hero{
-  background:linear-gradient(160deg,rgba(245,122,24,.14),transparent 42%),var(--panel);
+  background:linear-gradient(160deg,rgba(255,122,23,.14),transparent 42%),var(--panel);
   border:1px solid var(--border);border-radius:12px;padding:22px 20px;margin-bottom:14px;
 }
 .master-kicker{font-size:10px;font-weight:800;letter-spacing:1.8px;color:var(--accent);margin-bottom:8px}
@@ -478,8 +478,8 @@ body{
 .info-item .k{font-size:9px;color:var(--muted);letter-spacing:.8px;margin-bottom:4px}
 .info-item .v{font:600 14px/1.3 var(--sans);word-break:break-word}
 .tl-now{
-  background:linear-gradient(135deg,rgba(245,122,24,.18),rgba(0,0,0,.2));
-  border:1px solid rgba(245,122,24,.35);border-radius:12px;padding:18px;margin-bottom:14px;
+  background:linear-gradient(135deg,rgba(255,122,23,.18),rgba(0,0,0,.2));
+  border:1px solid rgba(255,122,23,.35);border-radius:12px;padding:18px;margin-bottom:14px;
 }
 .tl-now .tag{display:inline-block;font-size:9px;font-weight:800;letter-spacing:1px;background:var(--accent);color:#000;padding:3px 8px;border-radius:3px;margin-bottom:10px}
 .tl-now .title{font-size:clamp(20px,4.5vw,30px);font-weight:800;margin-bottom:4px}
@@ -491,7 +491,7 @@ body{
   display:flex;gap:12px;align-items:flex-start;padding:12px 14px;
   border-bottom:1px solid var(--border);background:rgba(255,255,255,.015);
 }
-.tl-row.active{background:rgba(245,122,24,.12);border-left:3px solid var(--accent)}
+.tl-row.active{background:rgba(255,122,23,.12);border-left:3px solid var(--accent)}
 .tl-row.played:not(.active){opacity:.55}
 .tl-num{font:700 13px var(--mono);color:var(--muted);width:28px;flex:none;padding-top:2px}
 .tl-body{min-width:0;flex:1}
@@ -534,7 +534,7 @@ footer{text-align:center;padding:8px 12px calc(10px + var(--safe-b));font-size:1
   <section class="panel" id="panel-tracklist" role="tabpanel"></section>
   <section class="panel" id="panel-monitor" role="tabpanel"></section>
 </main>
-<footer>Monitor en vivo · sin secretos · entikrecords.com</footer>
+<footer>Monitor en vivo · sin secretos · ENTIK MEDIA</footer>
 <script>
 (function(){
 const TAB_KEY='sc.monitor.tab';
@@ -556,7 +556,7 @@ function paintWave(canvas,d){
   const high=d.peaksHigh||[];
   const n=Math.max(peaks.length,64);
   const midY=h/2;
-  ctx.fillStyle='#050508';
+  ctx.fillStyle='#040405';
   ctx.fillRect(0,0,w,h);
   for(let i=0;i<n;i++){
     const x=(i/n)*w;
@@ -565,7 +565,7 @@ function paintWave(canvas,d){
     const vm=(mid[i%Math.max(mid.length,1)]|0)/255;
     const vh=(high[i%Math.max(high.length,1)]|0)/255;
     const amp=Math.max(0.08,(v*0.55+vm*0.3+vh*0.15))*midY*0.92;
-    ctx.fillStyle='rgb(245,'+Math.floor(90+v*80)+','+Math.floor(20+vh*40)+')';
+    var _wt=Math.max(0.001,v+vm+vh);var _r=Math.floor((255*v+51*vm+26*vh)/_wt);var _g=Math.floor((77*v+242*vm+140*vh)/_wt);var _b=Math.floor((13*v+31*vm+255*vh)/_wt);ctx.fillStyle='rgb('+_r+','+_g+','+_b+')';
     ctx.fillRect(x,midY-amp,bw,amp*2);
   }
 }
@@ -774,13 +774,13 @@ window.addEventListener('resize',()=>{
 html,body{margin:0;padding:0;width:1920px;height:1080px;overflow:hidden;background:\#(bg);color:#fff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
 .wrap{display:flex;flex-direction:column;height:1080px;padding:36px 48px;box-sizing:border-box}
 .tc{font:800 168px/0.9 'SF Mono','Menlo',monospace;letter-spacing:-4px;color:#fff;text-shadow:0 0 24px rgba(0,0,0,.55)}
-.master{margin-top:8px;font-size:28px;font-weight:700;letter-spacing:2px;color:#00e676}
+.master{margin-top:8px;font-size:28px;font-weight:700;letter-spacing:2px;color:#61ff7a}
 .decks{margin-top:auto;display:grid;grid-template-columns:repeat(4,1fr);gap:18px}
 .deck{min-height:118px}
-.tag{font-size:13px;font-weight:800;letter-spacing:1.4px;color:#8a8a9a}
-.play{color:#00e676}
+.tag{font-size:13px;font-weight:800;letter-spacing:1.4px;color:#949494}
+.play{color:#61ff7a}
 .title{font-size:22px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.bpm{font:700 20px 'SF Mono',monospace;color:#f5a623}
+.bpm{font:700 20px 'SF Mono',monospace;color:#ff7a17}
 </style>
 </head>
 <body>

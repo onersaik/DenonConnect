@@ -655,7 +655,7 @@ struct MonitorWindowView: View {
 
     private var footerBar: some View {
         HStack {
-            Text("entikrecords.com")
+            Text("ENTIK MEDIA")
                 .font(.system(size: 9, weight: .semibold))
                 .tracking(1.0)
                 .foregroundColor(palette.textTertiary)

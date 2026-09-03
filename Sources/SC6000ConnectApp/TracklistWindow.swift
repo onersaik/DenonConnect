@@ -412,7 +412,7 @@ struct TracklistWindowView: View {
                 .buttonStyle(.plain)
                 .font(.system(size: 10, weight: .bold))
                 .foregroundColor(palette.textSecondary)
-            Text("entikrecords.com")
+            Text("ENTIK MEDIA")
                 .font(.system(size: 9, weight: .semibold))
                 .tracking(1.0)
                 .foregroundColor(palette.textTertiary)

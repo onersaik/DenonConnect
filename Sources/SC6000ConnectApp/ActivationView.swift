@@ -118,7 +118,7 @@ struct ActivationView: View {
                     .transition(.opacity)
                 }
 
-                Text("entikrecords.com")
+                Text("ENTIK MEDIA")
                     .font(.system(size: 9, weight: .semibold))
                     .tracking(1.0)
                     .foregroundColor(Theme.textTertiary)

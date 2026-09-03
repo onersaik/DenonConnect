@@ -3,7 +3,7 @@
 Guía completa de cómo está construido el proyecto, por qué está construido así,
 y cómo seguir desarrollándolo.
 
-**DJ Saik** · @dj.saik · @entikrecords
+**STAGE CONNECT** · ENTIK MEDIA
 
 ---
 

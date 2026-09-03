@@ -1157,7 +1157,7 @@ private struct AppHeader: View {
             }
             Spacer()
                 VStack(alignment: .trailing, spacing: 2) {
-                    Text("entikrecords.com")
+                    Text("ENTIK MEDIA")
                         .font(.system(size: 10))
                         .foregroundColor(Color.secondary.opacity(0.4))
                     Text("1/2 play  ·  D Denon  ·  P Pioneer")
