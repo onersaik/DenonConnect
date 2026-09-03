@@ -1362,12 +1362,16 @@ final class OutputController: ObservableObject {
     private func makeDenonSnapshot(deck: DeckState, device: StageLinqDevice, overlay: TestLinkDeck?) -> SyncSnapshot {
         let b = Int(deck.currentBeat)
         let bpm = MusicalClock.bpm(overlay?.bpm ?? 0, deck.bpm, deck.beatBpm)
+        // Mismo playhead interpolado (velocidad real / pitch) que ve la UI
+        // en pantalla -- antes el LTC leía deck.resolvedElapsed, que solo
+        // cambia con cada paquete BeatInfo nuevo, así que el generador nunca
+        // tenía una señal de posición continua sobre la que medir velocidad.
         let playhead: Double? = {
             if let o = overlay { return o.position }
-            if let e = deck.resolvedElapsed { return e }
-            if deck.trackLength > 0, let p = deck.beatProgress { return p * deck.trackLength }
-            if deck.currentBeat > 0, bpm > 0 { return deck.currentBeat * 60.0 / bpm }
-            return nil
+            return deck.interpolatedElapsed(
+                playing: deck.playState == .playing,
+                length: deck.trackLength > 0 ? deck.trackLength : nil
+            )
         }()
         let playing = overlay?.playing ?? (deck.playState == .playing)
         let title = TrackNaming.cleanTitle(overlay?.title ?? deck.trackTitle)
@@ -1395,9 +1399,20 @@ final class OutputController: ObservableObject {
 
     private func makePioneerSnapshot(device: ProDJLinkDevice, overlay: TestLinkDeck?) -> SyncSnapshot {
         let bpm = MusicalClock.bpm(overlay?.bpm ?? 0, device.effectiveBPM, device.trackBPM)
+        // Mismo playhead interpolado (velocidad real / pitch) que ve la UI en
+        // pantalla -- antes el LTC recibía el valor crudo del paquete de red
+        // (solo cambia cuando llega un paquete de 50001), lo que producía
+        // saltos de varios frames entre lecturas y disparaba el hard-reset
+        // de LTCGenerator.applyPlayhead en cada actualización real, dejando
+        // la medición de velocidad congelada en 1x. Con el valor interpolado
+        // el playhead avanza de forma continua entre paquetes y la medición
+        // de velocidad del generador LTC puede funcionar de verdad.
         let playhead: Double? = {
             if let o = overlay { return o.position }
-            return device.resolvedPlayhead
+            return device.interpolatedPlayhead(
+                playing: device.isPlaying,
+                length: device.trackLength > 0 ? device.trackLength : nil
+            )
         }()
         // Título: overlay TestLink tiene prioridad; si no, metadatos DBSERVER del CDJ
         let overlayTitle = overlay?.title ?? ""

@@ -1288,26 +1288,11 @@ enum DeckDisplayBuilder {
             return nil
         }()
         let playing = overlay?.playing ?? (deck.playState == .playing)
-        // Interpola BeatInfo entre paquetes (TimelineView 30 fps).
-        let elapsed: Double? = {
-            if let o = overlay { return o.position }
-            if playing, deck.beatReceivedAt > .distantPast {
-                let beat = deck.liveBeat > 0 ? deck.liveBeat : deck.currentBeat
-                let bpm = deck.beatBpm > 0 ? deck.beatBpm : deck.bpm
-                if beat > 0, bpm > 0 {
-                    let dt = min(Date().timeIntervalSince(deck.beatReceivedAt), 2.0)
-                    let rate = deck.speed > 0.05 ? deck.speed : 1.0
-                    var e = (beat + dt * bpm / 60.0 * rate) * 60.0 / bpm
-                    if let l = length, l > 0 { e = min(max(e, 0), l) }
-                    return e
-                }
-            }
-            guard let e = deck.resolvedElapsed else {
-                if let p = deck.beatProgress, let l = length, l > 0 { return p * l }
-                return nil
-            }
-            return e
-        }()
+        // Interpola BeatInfo entre paquetes (TimelineView 30 fps). Misma
+        // función que usa el snapshot del generador LTC -- una sola fuente
+        // de verdad para la posición interpolada, en vez de dos streams
+        // distintos (ver DeckState.interpolatedElapsed).
+        let elapsed: Double? = overlay?.position ?? deck.interpolatedElapsed(playing: playing, length: length)
         let progress: Double? = {
             if let o = overlay?.progress { return o }
             guard let e = elapsed, let l = length, l > 0 else {
@@ -1397,17 +1382,11 @@ enum DeckDisplayBuilder {
         let bpm = MusicalClock.bpm(overlay?.bpm ?? 0, device.effectiveBPM, device.trackBPM)
         let length = overlay?.duration ?? (device.trackLength > 0 ? device.trackLength : nil)
         let playing = overlay?.playing ?? (device.trackLoaded && device.isPlaying)
-        // Interpola playhead 50001/status entre paquetes (TimelineView 30 fps).
-        let elapsed: Double? = {
-            if let ov = overlay?.position { return ov }
-            guard let raw = device.resolvedPlayhead ?? (device.hasPosition ? device.playhead : nil) else {
-                return nil
-            }
-            guard playing, let len = length, len > 0 else { return raw }
-            guard device.positionReceivedAt > .distantPast else { return raw }
-            let dt = min(Date().timeIntervalSince(device.positionReceivedAt), 2.0)
-            return min(raw + max(0, dt), len)
-        }()
+        // Interpola playhead 50001/status entre paquetes (TimelineView 30 fps),
+        // a la velocidad real del reproductor (pitch). Misma función que usa
+        // el snapshot del generador LTC -- una sola fuente de verdad para la
+        // posición interpolada, en vez de dos streams distintos.
+        let elapsed: Double? = overlay?.position ?? device.interpolatedPlayhead(playing: playing, length: length)
         let progress: Double? = {
             if let o = overlay?.progress { return o }
             guard let el = elapsed, let len = length, len > 0 else { return nil }

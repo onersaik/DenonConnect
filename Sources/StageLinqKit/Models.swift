@@ -87,6 +87,30 @@ public final class DeckState: ObservableObject, Identifiable {
         }
         return nil
     }
+
+    /// Playhead interpolado entre paquetes BeatInfo, a la velocidad real del
+    /// deck (pitch/vari-speed vía `speed`). Fuente única para la UI
+    /// (ContentView, elapsed en pantalla) y para el snapshot que alimenta el
+    /// generador LTC (OutputController.makeDenonSnapshot) -- antes el LTC
+    /// leía `resolvedElapsed`, que solo cambia cuando llega un paquete
+    /// BeatInfo nuevo, mientras la UI ya mostraba esta versión suavizada:
+    /// eran dos señales de posición distintas y el LTC no seguía la pista.
+    public func interpolatedElapsed(playing: Bool, length: Double?) -> Double? {
+        if playing, beatReceivedAt > .distantPast {
+            let beat = liveBeat > 0 ? liveBeat : currentBeat
+            let useBpm = beatBpm > 0 ? beatBpm : bpm
+            if beat > 0, useBpm > 0 {
+                let dt = min(Date().timeIntervalSince(beatReceivedAt), 2.0)
+                let rate = speed > 0.05 ? speed : 1.0
+                var e = (beat + dt * useBpm / 60.0 * rate) * 60.0 / useBpm
+                if let l = length, l > 0 { e = min(max(e, 0), l) }
+                return e
+            }
+        }
+        if let e = resolvedElapsed { return e }
+        if let p = beatProgress, let l = length, l > 0 { return p * l }
+        return nil
+    }
 }
 
 /// Un dispositivo StageLinq descubierto (p. ej. un Denon SC6000).

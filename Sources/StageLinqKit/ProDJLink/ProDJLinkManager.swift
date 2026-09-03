@@ -74,6 +74,24 @@ public final class ProDJLinkDevice: ObservableObject, Identifiable {
         return Double(beatCount) * 60.0 / bpm
     }
 
+    /// Playhead interpolado entre paquetes de posición del puerto 50001,
+    /// avanzando a la velocidad REAL del reproductor (pitch/vari-speed) en
+    /// vez de asumir 1x. Usado tanto por la UI (ContentView, elapsed en
+    /// pantalla) como por el snapshot que alimenta el generador LTC
+    /// (OutputController.makePioneerSnapshot) -- antes el LTC recibía el
+    /// valor crudo (solo cambia cuando llega un paquete de red) mientras la
+    /// UI ya mostraba esta versión suavizada; eran dos señales distintas y
+    /// el LTC saltaba a trompicones en vez de seguir la pista.
+    public func interpolatedPlayhead(playing: Bool, length: Double?) -> Double? {
+        guard let raw = resolvedPlayhead ?? (hasPosition ? playhead : nil) else { return nil }
+        guard playing, let len = length, len > 0 else { return raw }
+        guard positionReceivedAt > .distantPast else { return raw }
+        let dt = min(Date().timeIntervalSince(positionReceivedAt), 2.0)
+        let speed = 1.0 + (pitchPercent / 100.0)
+        let advance = max(0, dt) * (speed.isFinite && speed > 0 ? speed : 1.0)
+        return min(raw + advance, len)
+    }
+
     /// CDJ virtual de STAGE CONNECT (player 7 / modelo propio). Nunca debe pintarse.
     public var isOwnVirtualCDJ: Bool {
         DJLink.isVirtualCDJ(playerNumber: playerNumber, model: model)

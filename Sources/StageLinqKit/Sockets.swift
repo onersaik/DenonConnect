@@ -307,6 +307,26 @@ public final class TCPConnection {
         var tv = timeval(tv_sec: 5, tv_usec: 0)
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
 
+        // TCP keepalive: si el peer (SC6000/CDJ) desaparece de la red sin
+        // cerrar limpiamente (Wi‑Fi que se cae, cable, congelación del
+        // firmware) el socket se queda "conectado" para siempre y el bucle
+        // de lectura de arriba solo ve timeouts de 1 s indefinidamente --
+        // nunca lanza un error, así que StateMap/BeatInfo jamás reconectan y
+        // la fila del deck se queda congelada. Con keepalive, tras ~5 s de
+        // silencio el SO manda sondas cada 3 s; si 3 fallan (~14 s) recv()
+        // devuelve un error real y el bucle de reconexión (con backoff) que
+        // ya existía se dispara solo.
+        var keepaliveOn: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &keepaliveOn, socklen_t(MemoryLayout<Int32>.size))
+        #if canImport(Darwin)
+        var keepIdle: Int32 = 5
+        setsockopt(fd, IPPROTO_TCP, TCP_KEEPALIVE, &keepIdle, socklen_t(MemoryLayout<Int32>.size))
+        var keepIntvl: Int32 = 3
+        setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &keepIntvl, socklen_t(MemoryLayout<Int32>.size))
+        var keepCnt: Int32 = 3
+        setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &keepCnt, socklen_t(MemoryLayout<Int32>.size))
+        #endif
+
         isOpen = true
     }
 

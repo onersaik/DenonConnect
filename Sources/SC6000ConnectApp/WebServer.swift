@@ -125,11 +125,13 @@ public final class WebServer {
         log("[Web] Servidor detenido")
     }
 
-    // MARK: SSE timer (50 ms = 20 fps tiempo real)
+    // MARK: SSE timer (150 ms ~ 6-7 fps tiempo real; el cliente ya no
+    // repinta el DOM/canvas en cada tick, solo cuando cambian datos reales -
+    // ver comentario en monitorHTML).
 
     private func startPushTimer() {
         let t = DispatchSource.makeTimerSource(queue: queue)
-        t.schedule(deadline: .now() + 0.1, repeating: .milliseconds(50))
+        t.schedule(deadline: .now() + 0.1, repeating: .milliseconds(150))
         t.setEventHandler { [weak self] in self?.broadcastLive() }
         t.resume()
         pushTimer = t
@@ -596,15 +598,60 @@ function deckCard(d,i){
     '<div class="meta"><span class="el">'+fmt(head)+'</span><span>'+(d.tcTimecode?esc(d.tcTimecode):'')+'</span><span>'+(rem!=null?'-'+fmt(rem):'')+'</span></div>'+
     '</div></article>';
 }
+function cardSig(d){
+  return [d.title,d.artist,d.label,d.tag,d.isMaster,d.isOnAir,d.ltcSource,d.isPlaying,
+    d.bpm,d.key,(d.peaksLow&&d.peaksLow.length)||(d.peaks&&d.peaks.length)||0,
+    (d.peaksMid&&d.peaksMid.length)||0,(d.peaksHigh&&d.peaksHigh.length)||0
+  ].join('|');
+}
+function updateFastFields(card,d){
+  if(!card)return;
+  const head=d.playhead!=null?d.playhead:d.elapsed;
+  const rem=(d.duration!=null&&head!=null)?Math.max(0,d.duration-head):null;
+  const meta=card.querySelector('.meta');
+  if(meta){
+    const spans=meta.querySelectorAll('span');
+    if(spans[0])spans[0].textContent=fmt(head);
+    if(spans[1])spans[1].textContent=d.tcTimecode||'';
+    if(spans[2])spans[2].textContent=rem!=null?('-'+fmt(rem)):'';
+  }
+  card.querySelectorAll('.beat').forEach((el,idx)=>{
+    el.classList.toggle('on',d.beatInBar===(idx+1));
+  });
+}
 function renderPlayers(root,decks){
   if(!decks.length){
     root.innerHTML='<div class="empty">Sin decks activos<br>Carga una pista en Denon / Pioneer / Serato / VDJ</div>';
     return;
   }
-  root.innerHTML='<div class="grid">'+decks.map(deckCard).join('')+'</div>';
-  root.querySelectorAll('canvas').forEach(c=>{
-    const i=+c.getAttribute('data-i');
-    paintWave(c,decks[i]||{});
+  let grid=root.querySelector('.grid');
+  let cards=grid?Array.from(grid.children):[];
+  if(!grid||cards.length!==decks.length){
+    root.innerHTML='<div class="grid">'+decks.map(deckCard).join('')+'</div>';
+    grid=root.querySelector('.grid');
+    cards=Array.from(grid.children);
+    cards.forEach((card,i)=>{
+      card.dataset.sig=cardSig(decks[i]);
+      const c=card.querySelector('canvas');
+      if(c)paintWave(c,decks[i]);
+    });
+    return;
+  }
+  decks.forEach((d,i)=>{
+    const card=cards[i];
+    const sig=cardSig(d);
+    if(card.dataset.sig!==sig){
+      const tmp=document.createElement('div');
+      tmp.innerHTML=deckCard(d,i);
+      const newCard=tmp.firstElementChild;
+      newCard.dataset.sig=sig;
+      grid.replaceChild(newCard,card);
+      const c=newCard.querySelector('canvas');
+      if(c)paintWave(c,d);
+      cards[i]=newCard;
+    } else {
+      updateFastFields(card,d);
+    }
   });
 }
 function renderMaster(root,decks,tc){
@@ -613,20 +660,29 @@ function renderMaster(root,decks,tc){
     root.innerHTML='<div class="empty">Sin MASTER<br>Activa LTC o pon un deck en play</div>';
     return;
   }
+  const sig=cardSig(m);
   const head=m.playhead!=null?m.playhead:m.elapsed;
-  root.innerHTML=
-    '<div class="master-hero">'+
-    '<div class="master-kicker">MASTER</div>'+
-    '<div class="master-title">'+esc(m.title||'SIN PISTA')+'</div>'+
-    '<div class="master-artist">'+esc(m.artist||m.label||'')+'</div>'+
-    '<div class="master-stats">'+
-    '<div class="stat"><div class="k">TIMECODE</div><div class="v">'+esc(tc||m.tcTimecode||'00:00:00:00')+'</div></div>'+
-    '<div class="stat"><div class="k">BPM</div><div class="v">'+(m.bpm>0?m.bpm.toFixed(2):'—')+'</div></div>'+
-    '<div class="stat"><div class="k">PLAYHEAD</div><div class="v">'+fmt(head)+'</div></div>'+
-    '</div></div>'+
-    '<div class="grid">'+deckCard(m,0)+'</div>';
-  const c=root.querySelector('canvas');
-  if(c) paintWave(c,m);
+  if(!root.querySelector('.master-hero')||root.dataset.sig!==sig){
+    root.innerHTML=
+      '<div class="master-hero">'+
+      '<div class="master-kicker">MASTER</div>'+
+      '<div class="master-title">'+esc(m.title||'SIN PISTA')+'</div>'+
+      '<div class="master-artist">'+esc(m.artist||m.label||'')+'</div>'+
+      '<div class="master-stats">'+
+      '<div class="stat"><div class="k">TIMECODE</div><div class="v">'+esc(tc||m.tcTimecode||'00:00:00:00')+'</div></div>'+
+      '<div class="stat"><div class="k">BPM</div><div class="v">'+(m.bpm>0?m.bpm.toFixed(2):'—')+'</div></div>'+
+      '<div class="stat"><div class="k">PLAYHEAD</div><div class="v">'+fmt(head)+'</div></div>'+
+      '</div></div>'+
+      '<div class="grid">'+deckCard(m,0)+'</div>';
+    root.dataset.sig=sig;
+    const c=root.querySelector('canvas');
+    if(c)paintWave(c,m);
+  } else {
+    const vEls=root.querySelectorAll('.master-stats .v');
+    if(vEls[0])vEls[0].textContent=tc||m.tcTimecode||'00:00:00:00';
+    if(vEls[2])vEls[2].textContent=fmt(head);
+    updateFastFields(root.querySelector('.grid .deck'),m);
+  }
 }
 function renderInfo(root,st){
   const decks=st.decks||[];
@@ -681,17 +737,25 @@ function renderTracklist(root,tl,tc){
 }
 function renderMonitor(root,decks,tc){
   const m=masterDeck(decks);
-  root.innerHTML=
-    '<div class="master-hero" style="text-align:center">'+
-    '<div class="master-kicker">MONITOR TC</div>'+
-    '<div style="font:800 clamp(42px,12vw,96px)/1 var(--mono);color:var(--green);letter-spacing:1px;margin:12px 0 18px">'+esc(tc||'00:00:00:00')+'</div>'+
-    '<div class="master-title" style="font-size:18px">'+esc(m?(m.title||'SIN PISTA'):'Esperando decks')+'</div>'+
-    '<div class="master-artist">'+esc(m?(m.artist||m.label||''):'')+'</div></div>'+
-    (decks.length?'<div class="grid">'+decks.map(deckCard).join('')+'</div>':'');
-  root.querySelectorAll('canvas').forEach(c=>{
-    const i=+c.getAttribute('data-i');
-    paintWave(c,decks[i]||{});
-  });
+  const sig=decks.map(cardSig).join('~')+'|'+(m?(m.title+'|'+m.artist):'');
+  if(!root.querySelector('.master-hero')||root.dataset.sig!==sig){
+    root.innerHTML=
+      '<div class="master-hero" style="text-align:center">'+
+      '<div class="master-kicker">MONITOR TC</div>'+
+      '<div class="mtc" style="font:800 clamp(42px,12vw,96px)/1 var(--mono);color:var(--green);letter-spacing:1px;margin:12px 0 18px">'+esc(tc||'00:00:00:00')+'</div>'+
+      '<div class="master-title" style="font-size:18px">'+esc(m?(m.title||'SIN PISTA'):'Esperando decks')+'</div>'+
+      '<div class="master-artist">'+esc(m?(m.artist||m.label||''):'')+'</div></div>'+
+      (decks.length?'<div class="grid">'+decks.map(deckCard).join('')+'</div>':'');
+    root.dataset.sig=sig;
+    root.querySelectorAll('canvas').forEach(c=>{
+      const i=+c.getAttribute('data-i');
+      paintWave(c,decks[i]||{});
+    });
+  } else {
+    const tcEl=root.querySelector('.mtc');
+    if(tcEl)tcEl.textContent=tc||'00:00:00:00';
+    root.querySelectorAll('.grid .deck').forEach((card,i)=>updateFastFields(card,decks[i]));
+  }
 }
 function setTab(name){
   activeTab=name;
