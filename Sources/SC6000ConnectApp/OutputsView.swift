@@ -16,6 +16,7 @@ struct OutputsView: View {
     @EnvironmentObject var software: SoftwareDJManager
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var localization: LocalizationStore
+    @EnvironmentObject var updates: AppUpdateStore
     @Environment(\.presentationMode) private var presentation
     @Environment(\.openWindow) private var openWindow
 
@@ -31,6 +32,7 @@ struct OutputsView: View {
         case history = "Historial"
         case labels   = "Etiquetas"
         case mapping = "Mapeo"
+        case updates    = "Actualizaciones"
         case license    = "Licencia"
         case language   = "Idioma"
         case appearance = "Apariencia"
@@ -45,6 +47,7 @@ struct OutputsView: View {
             case .history: return "clock.arrow.circlepath"
             case .labels:  return "tag"
             case .mapping: return "keyboard"
+            case .updates:    return "arrow.down.circle"
             case .license:    return "key.fill"
             case .language:   return "globe"
             case .appearance: return "circle.lefthalf.filled"
@@ -117,6 +120,7 @@ struct OutputsView: View {
                 if s == .mtc && outputs.mtcEnabled   { dot(Theme.purple) }
                 if s == .osc && outputs.resolumeEnabled { dot(Theme.accent) }
                 if s == .web && outputs.webEnabled   { dot(Theme.ledGreen) }
+                if s == .updates && updates.hasUpdate { dot(Theme.accent) }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
@@ -167,6 +171,7 @@ struct OutputsView: View {
                 case .history: historySection
                 case .labels:  labelsSection
                 case .mapping: mappingSection
+                case .updates:    updatesSection
                 case .license:    licenseSection
                 case .language:   languageSection
                 case .appearance: appearanceSection
@@ -225,6 +230,23 @@ struct OutputsView: View {
                     ))
                     .toggleStyle(.checkbox)
                     .labelsHidden()
+                }
+                Divider().background(Theme.panelBorder)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Emergencia de red")
+                        .font(.system(size: 11))
+                        .foregroundColor(Theme.textSecondary)
+                    Picker("", selection: $outputs.ltcNetworkLossMode) {
+                        ForEach(LTCNetworkLossMode.allCases) { mode in
+                            Text(mode.label).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    Text(outputs.ltcNetworkLossMode.help)
+                        .font(.system(size: 10))
+                        .foregroundColor(Theme.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Divider().background(Theme.panelBorder)
                 labelRow(label: "Frame rate") {
@@ -1121,6 +1143,106 @@ struct OutputsView: View {
             }
 
             Text("El modo claro adapta el fondo y el texto automaticamente. Los colores de acento, LED y waveform no cambian.")
+                .font(.system(size: 10))
+                .foregroundColor(Theme.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    // MARK: Actualizaciones
+
+    private var updatesSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            sectionHeader(icon: "arrow.down.circle", title: "Actualizaciones",
+                          subtitle: "Consulta el servidor de licencias (:3000 / connectapp). Si hay un build mas nuevo, se descarga a Descargas y se abre el Finder.")
+
+            settingsPanel {
+                labelRow(label: "Version local") {
+                    Text("\(AppUpdateStore.currentVersion) (\(AppUpdateStore.currentBuild))")
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .foregroundColor(Theme.textPrimary)
+                }
+                Divider().background(Theme.panelBorder)
+                labelRow(label: "Estado") {
+                    Text(updates.statusMessage.isEmpty ? "Sin comprobar" : updates.statusMessage)
+                        .font(.system(size: 12))
+                        .foregroundColor(updates.lastError.isEmpty ? Theme.textSecondary : Theme.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let remote = updates.available {
+                    Divider().background(Theme.panelBorder)
+                    labelRow(label: "Disponible") {
+                        Text("v\(remote.version)")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(Theme.accent)
+                    }
+                    if !remote.notes.isEmpty {
+                        Divider().background(Theme.panelBorder)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Notas")
+                                .font(.system(size: 11))
+                                .foregroundColor(Theme.textSecondary)
+                            Text(remote.notes)
+                                .font(.system(size: 11))
+                                .foregroundColor(Theme.textPrimary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.vertical, 8)
+                    }
+                }
+            }
+
+            HStack(spacing: 10) {
+                Button {
+                    updates.checkForUpdates()
+                } label: {
+                    HStack(spacing: 6) {
+                        if updates.isChecking {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                        Text(updates.isChecking ? "COMPROBANDO…" : "REVISAR SI HAY ACTUALIZACIONES")
+                            .font(.system(size: 11, weight: .bold))
+                            .tracking(0.5)
+                            .noClip()
+                    }
+                    .foregroundColor(Theme.textPrimary)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(Rectangle().fill(Theme.buttonBg))
+                }
+                .buttonStyle(.plain)
+                .disabled(updates.isChecking || updates.isDownloading)
+
+                if updates.hasUpdate {
+                    Button {
+                        updates.installAvailableUpdate()
+                    } label: {
+                        HStack(spacing: 6) {
+                            if updates.isDownloading {
+                                ProgressView()
+                                    .controlSize(.small)
+                                Text(String(format: "%.0f%%", updates.downloadProgress * 100))
+                                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            } else {
+                                Image(systemName: "arrow.down.circle.fill")
+                                Text("ACTUALIZAR")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .tracking(0.6)
+                            }
+                        }
+                        .foregroundColor(.black)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(Rectangle().fill(Theme.accent))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(updates.isDownloading)
+                    .help("Descarga el build a Descargas y abre Finder")
+                }
+            }
+
+            Text("Tras descargar: abre el .dmg o descomprime el .zip y sustituye STAGE CONNECT en Aplicaciones. No hace falta cerrar la cabina hasta instalar.")
                 .font(.system(size: 10))
                 .foregroundColor(Theme.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)

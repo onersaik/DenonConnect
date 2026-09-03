@@ -123,6 +123,7 @@ struct PlayerDeckRow: View {
 
     @EnvironmentObject private var artwork: ArtworkFetcher
     @EnvironmentObject private var labels: DeckLabelStore
+    @EnvironmentObject private var outputs: OutputController
     @Environment(\.waveformWindowSeconds) private var waveformWindowSeconds
     @State private var editingTag = false
     @State private var tagDraft = ""
@@ -486,10 +487,7 @@ struct PlayerDeckRow: View {
     }
 
     private var displayedTimecode: String {
-        if let tc = deck.ltcTimecode, !tc.isEmpty, !(tc == "00:00:00:00" && (deck.elapsed ?? 0) > 0.04) {
-            return tc
-        }
-        return LTCGenerator.timecodeText(seconds: deck.elapsed ?? 0, fps: 25)
+        outputs.displayTimecode(deckID: deck.id, elapsed: deck.elapsed)
     }
 
     private var keyText: String {
@@ -721,7 +719,8 @@ struct PlayerDeckRow: View {
 
     private var waveformOpacity: Double {
         let hasPeaks = !deck.peaks.isEmpty || deck.peaksLow.count > 1
-        if deck.loaded && (waveformProgress != nil || hasPeaks) { return 1 }
+        let hasLength = (deck.trackLength ?? 0) > 0
+        if deck.loaded && (waveformProgress != nil || hasPeaks || hasLength) { return 1 }
         return isLarge ? 0.28 : 0.22
     }
 

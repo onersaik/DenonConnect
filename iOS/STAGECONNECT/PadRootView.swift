@@ -5,6 +5,7 @@ struct PadRootView: View {
     @EnvironmentObject var manager: StageLinqManager
     @EnvironmentObject var proDJLink: ProDJLinkManager
     @EnvironmentObject var testLink: TestLinkReceiver
+    @EnvironmentObject var testPlayback: TestLinkPlayback
     @EnvironmentObject var license: LicenseStore
 
     var body: some View {
@@ -124,7 +125,7 @@ struct PadRootView: View {
         let _ = testLink.rosterTick
         if testLink.roster.denonOn {
             for i in 0..<2 {
-                if let o = testLink.snapshot?.deck(i), o.loaded {
+                if let o = testPlayback.snapshot?.deck(i), o.loaded {
                     rows.append(PadDeck(
                         id: "denon-test-\(i)",
                         label: i == 0 ? "DENON A" : "DENON B",
@@ -142,7 +143,7 @@ struct PadRootView: View {
                         peaksLow: o.peaksLow,
                         peaksMid: o.peaksMid,
                         peaksHigh: o.peaksHigh,
-                        signalAt: testLink.lastPacketAt,
+                        signalAt: testPlayback.lastPacketAt,
                         controlStamp: padStamp(playing: o.playing, master: o.isMaster, title: o.title)
                     ))
                 }
@@ -204,8 +205,8 @@ struct PadRootView: View {
             }
         }
         if testLink.roster.hasPioneerTrack, !testLink.roster.denonOn,
-           let o = testLink.snapshot?.decks.first(where: { $0.loaded && $0.playing })
-            ?? testLink.snapshot?.firstLoadedDeck() {
+           let o = testPlayback.snapshot?.decks.first(where: { $0.loaded && $0.playing })
+            ?? testPlayback.snapshot?.firstLoadedDeck() {
             rows.append(PadDeck(
                 id: "pioneer-test",
                 label: "CDJ-3000 · PLAYER 2",
@@ -223,7 +224,7 @@ struct PadRootView: View {
                 peaksLow: o.peaksLow,
                 peaksMid: o.peaksMid,
                 peaksHigh: o.peaksHigh,
-                signalAt: testLink.lastPacketAt,
+                signalAt: testPlayback.lastPacketAt,
                 controlStamp: padStamp(playing: o.playing, master: o.isMaster, title: o.title)
             ))
         }

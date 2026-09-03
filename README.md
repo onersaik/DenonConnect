@@ -1,176 +1,142 @@
-# SC6000 Connect
+# STAGE CONNECT — Web y gestor de licencias
 
-**DJ Saik** · [@dj.saik](https://instagram.com/dj.saik) · [@entikrecords](https://instagram.com/entikrecords)
+Dos sitios, un solo proceso Node. Nginx enruta por dominio.
 
-App nativa de macOS (ventana propia, sin terminal) que muestra en vivo el estado
-de tus reproductores de DJ en red:
+| Dominio | Que es |
+|---|---|
+| `stageconnect.entikmedia.com` | Web publica de producto |
+| `app.entikmedia.com` | Gestor de licencias, privado y sin indexar |
 
-- **Denon SC6000 / Engine OS** por **StageLinq** — los 4 decks lógicos
-  (Deck1‑A/B, Deck2‑A/B) con pista, artista, key, género, BPM, play/pausa, loop,
-  key lock, volumen y **posición de beat en tiempo real**.
-- **Pioneer / AlphaTheta CDJ‑3000** (y CDJ‑2000NXS2, XDJ, DJM) por
-  **Pro DJ Link** — BPM real con el pitch aplicado, pitch %, play/cue/loop,
-  master, sync, on‑air y beat dentro del compás.
+## Subir al servidor
 
-Son dos protocolos completamente distintos e independientes; la app habla los
-dos a la vez y los muestra en la misma ventana.
-
-## Estado
-
-✅ **Compila y empaqueta correctamente** en macOS (Swift 5.10, verificado en CI
-sobre un Mac real: debug y release, sin warnings de código).
-
-## Cómo conseguir la app lista para usar
-
-Cada push al repositorio genera automáticamente la app ya empaquetada:
-
-1. Entra en la pestaña **Actions** del repositorio.
-2. Abre la ejecución más reciente (la de arriba, en verde).
-3. Abajo del todo, en **Artifacts**, descarga **SC6000-Connect-app**.
-4. Descomprime y arrastra `SC6000 Connect.app` a tu carpeta de Aplicaciones.
-
-### Primera ejecución — dos avisos de macOS
-
-**1. Gatekeeper.** La app no está firmada con una cuenta de desarrollador de
-Apple, así que al abrirla por doble clic macOS dirá que no puede verificar al
-desarrollador. Solución: **clic derecho sobre la app → Abrir → Abrir**. Solo la
-primera vez. Si aún así se resiste:
+Desde tu Mac, un solo comando:
 
 ```bash
-xattr -dr com.apple.quarantine "/Applications/SC6000 Connect.app"
+bash subir.sh root@dl120
 ```
 
-**2. Permiso de red local.** macOS pedirá permiso para "buscar dispositivos en
-la red local". **Hay que aceptarlo**: sin él la app no ve ni los SC6000 ni los
-CDJ. Si lo rechazaste por error, se reactiva en Ajustes del Sistema →
-Privacidad y seguridad → Red local.
+Copia todo, instala dependencias, arranca el servicio, configura nginx
+(apartando cualquier otro sitio que reclame esos dominios) y saca el
+certificado con certbot. La primera vez pide la contrasena del panel.
 
-## Compilar desde el código
-
-```bash
-swift build -c release      # desde la terminal
-```
-
-O abre `Package.swift` con Xcode, elige el esquema **SC6000ConnectApp → My Mac**
-y pulsa ▶️.
-
-## Red
-
-Tus reproductores y este Mac deben estar en el mismo segmento de red (mismo
-switch o mismo WiFi) para que lleguen los paquetes de descubrimiento por
-broadcast.
-
-Puertos que usa la app:
-
-| Puerto | Protocolo | Uso |
-|---|---|---|
-| 51337 UDP | StageLinq | descubrimiento de SC6000 |
-| (dinámico) TCP | StageLinq | StateMap y BeatInfo |
-| 50000 UDP | Pro DJ Link | presencia de CDJ + nuestro anuncio |
-| 50002 UDP | Pro DJ Link | estado detallado de los CDJ |
-
-Si tienes **rekordbox abierto** en el mismo Mac, ocupará los puertos de Pro DJ
-Link y la app no verá los CDJ. Cierra rekordbox si quieres ver los CDJ aquí.
-
-Para que los CDJ envíen estado detallado, la app se anuncia en la red como
-reproductor virtual número **7** (fuera del rango 1–6 que usan los
-reproductores reales, para no provocar conflictos de número de player).
-
-## Modos
-
-Selector en la cabecera:
-
-- **Auto** — detecta lo que hay en la red y elige solo. Si ve Denon y Pioneer a
-  la vez, pasa a Dual.
-- **Denon** — solo SC6000 / Engine OS.
-- **Pioneer** — solo CDJ / Pro DJ Link.
-- **Dual** — todo junto, apilado. Sin límite de 2 decks: muestra los que haya
-  (4, 6 o los que aparezcan en la red).
-
-## Formas de onda y cues — estado real
-
-**Todavía no están, y es importante entender por qué:** ni StageLinq ni Pro DJ
-Link emiten la forma de onda por la red. Lo que se ve en un CDJ o en ShowKontrol
-sale de la **base de datos del reproductor**, que hay que pedir aparte:
-
-- **CDJ (Pro DJ Link)** → cliente TCP `dbserver` del reproductor
-  (`GetWaveformPreview`, `GetWaveformDetailed`, `GetWaveformHD`,
-  `GetCueAndLoops`). Es también lo que da **título y artista** reales.
-- **SC6000 (StageLinq)** → servicio `FileTransfer` + lectura de la base de datos
-  de Engine y sus ficheros de análisis.
-
-Son dos implementaciones nuevas y considerables, una por protocolo. Está
-documentado y es viable, pero es la siguiente fase del proyecto, no un ajuste
-de la interfaz.
-
-Mientras tanto, la fila de cada deck muestra **rejilla de beats en vivo**
-(posición dentro del compás, con dato real de red), barra de posición, tiempo
-transcurrido y restante, y BPM efectivo. Nada de esto está inventado ni
-interpolado a ojo.
-
-## Qué muestra cada protocolo, y qué no
-
-**SC6000 (StageLinq):** todo — título, artista, key, género, BPM, estado, loop,
-key lock, volumen y beat. Las 47 rutas de estado por deck están suscritas.
-
-**CDJ‑3000 (Pro DJ Link):** todo el estado de reproducción (BPM efectivo, pitch,
-play/cue/loop, master, sync, on‑air, beat del compás, slot de origen) **pero no
-el título ni el artista**. Eso es una limitación del protocolo: el CDJ solo
-envía el ID de la pista en su base de datos, y obtener el nombre requiere
-implementar además el cliente TCP de consultas a la base de datos del
-reproductor (`dbserver`), que es un proyecto aparte considerablemente mayor.
-
-## Sobre Resolume
-
-Resolume no lee esta app: tiene su **propio** soporte nativo de entrada para
-StageLinq y Pro DJ Link en sus preferencias. Ambos son clientes independientes
-escuchando los mismos anuncios de red, así que conviven sin interferir. Si
-Resolume no detecta los decks, revisa: misma red/switch, cortafuegos de macOS
-sin bloquear los puertos de arriba, y reiniciar el descubrimiento en Resolume
-después de encender los reproductores. Esta app te sirve en paralelo como panel
-de diagnóstico para confirmar que la red va bien antes de depurar Resolume.
-
-## Origen de los datos del protocolo
-
-Nada de esto está adivinado. Los formatos binarios están verificados contra
-implementaciones de referencia:
-
-- StageLinq → [chrisle/StageLinq](https://github.com/chrisle/StageLinq)
-- Pro DJ Link → [Deep Symmetry / dysentery](https://djl-analysis.deepsymmetry.org)
-  y [flesniak/python-prodj-link](https://github.com/flesniak/python-prodj-link),
-  dos fuentes independientes que coinciden entre sí en los offsets clave
-  (BPM `0x92`, contador de beat `0xa0`, beat del compás `0xa6`, flags `0x89`).
+Para actualizar mas adelante, el mismo comando.
 
 ## Estructura
 
 ```
-Package.swift
-Sources/
-  StageLinqKit/            librería de protocolo (sin interfaz)
-    ByteIO.swift             lectura/escritura binaria Big Endian
-    Sockets.swift            sockets BSD (UDP/TCP)
-    Protocol.swift           constantes StageLinq + descubrimiento
-    StatePaths.swift         las 47 rutas de estado por deck
-    StateValue.swift         JSON embebido de StateMap
-    Models.swift             DeckState / StageLinqDevice
-    NetworkDevice.swift      conexión principal StageLinq
-    ServiceConnection.swift  framing común de servicios
-    StateMapService.swift    suscripción a estado
-    BeatInfoService.swift    beat en vivo
-    StageLinqManager.swift   orquestador StageLinq
-    ProDJLink/               ← soporte CDJ (protocolo independiente)
-      DJLinkProtocol.swift     paquetes y offsets Pro DJ Link
-      NetworkInfo.swift        IP local de la interfaz
-      ProDJLinkManager.swift   descubrimiento, CDJ virtual y estado
-  SC6000ConnectApp/        interfaz SwiftUI
-    SC6000ConnectApp.swift   punto de entrada
-    ContentView.swift        ventana principal
-    DeckCardView.swift       tarjeta de deck (SC6000)
-    CDJStripView.swift       franja de CDJ (Pro DJ Link)
-    SidebarView.swift        lista de dispositivos
-    LogView.swift            log de protocolo
-    Theme.swift              paleta visual
-packaging/Info.plist       metadatos del bundle .app
-Resources/                 icono de la app
-.github/workflows/         CI: compila y empaqueta la app en cada push
+server.js              Express: rutas y cabeceras de seguridad
+lib/keygen.js          Generacion y validacion de claves
+lib/security.js        Sesiones, bcrypt, bloqueo por fuerza bruta, auditoria
+db/database.js         SQLite (WAL) y sentencias preparadas
+routes/api.js          API que consume la app: activar, verificar, liberar
+routes/auth.js         Login del panel
+routes/admin.js        API del panel: keygen, licencias, solicitudes
+public/index.html      Web publica
+admin/index.html       Panel de gestion
+nginx/                 Configuraciones de los dos dominios
+scripts/deploy.sh      Despliegue en el servidor
+scripts/generar-claves.sh  Crea el .env con secretos aleatorios
+subir.sh               Sube y despliega desde tu Mac
 ```
+
+## Formato de las claves
+
+```
+SCL-XXXX-XXXX-XXXXC    Vitalicia
+SCM-XXXX-XXXX-XXXXC    Mensual
+SCT-XXXX-XXXX-XXXXC    Prueba
+```
+
+Doce caracteres aleatorios del alfabeto `ABCDEFGHJKLMNPQRSTUVWXYZ23456789`
+(sin I, O, 0 ni 1, para que nadie confunda un caracter al teclear).
+
+El ultimo caracter es un digito de control HMAC-SHA256 derivado con
+`LICENSE_SECRET`. Sirve para descartar erratas antes de consultar la base de
+datos, y para que la app rechace codigos inventados sin conexion.
+
+**`LICENSE_SECRET` no se puede cambiar despues de emitir licencias.** Si cambia,
+el checksum de todas las claves ya entregadas deja de validar. Guarda una copia
+en sitio seguro.
+
+## Codigo de desbloqueo de emergencia
+
+`KEEPTHEFAITH`
+
+Va compilado en la aplicacion. Desbloquea todas las funciones sin contactar con
+el servidor y sin caducidad. Existe para que un directo no dependa nunca de que
+haya red o de que el servidor este en pie.
+
+No aparece en la web ni en el panel. Se entrega verbalmente o por correo cuando
+hay una incidencia.
+
+Para cambiarlo: `Sources/SC6000ConnectApp/LicenseStore.swift`, constante
+`masterCode`. Hay que recompilar la app.
+
+## API que consume la aplicacion
+
+| Ruta | Que hace |
+|---|---|
+| `POST /api/activate` | Canjea la clave y vincula el equipo |
+| `POST /api/verify` | Latido: confirma que la licencia sigue viva |
+| `POST /api/release` | Libera el equipo para usar la clave en otro |
+| `GET /api/health` | Comprobacion de servicio |
+
+El equipo se identifica por el `IOPlatformUUID` del Mac, que se guarda en la
+base de datos como HMAC, nunca en claro.
+
+La aplicacion **no bloquea nunca por falta de red**. Solo se desactiva ante una
+negativa explicita del servidor (licencia revocada o caducada). Sin conexion,
+timeout o error 5xx: sigue funcionando.
+
+## Panel de gestion
+
+- **Resumen** — activas, sin usar, equipos vinculados, solicitudes pendientes
+- **Generar claves** — lote de hasta 500, con cliente, equipos y caducidad
+- **Licencias** — buscar, editar, revocar, renovar, ver y liberar equipos
+- **Solicitudes** — peticiones de la web; genera la clave desde la ficha
+- **Actividad** — cada intento de activacion con resultado e IP
+- **Registro** — auditoria de todo lo hecho en el panel
+- **Sesiones** — accesos abiertos, revocables uno a uno o todos
+
+### Seguridad del panel
+
+- Contrasena con bcrypt (coste 12), nunca en texto plano
+- Sesion JWT con el hash guardado en base de datos: revocable al instante
+- Bloqueo de IP tras 5 intentos fallidos, 15 minutos
+- Limite de peticiones en nginx: 5/min en login, 30/min en el resto
+- Cookie httpOnly, secure y sameSite strict
+- `noindex` en cabeceras y robots.txt
+- Toda accion queda en la tabla de auditoria con IP y fecha
+- Lista blanca de IP disponible en `nginx/app.entikmedia.com.conf`
+
+## Variables de entorno
+
+| Variable | Para que |
+|---|---|
+| `LICENSE_SECRET` | Firma del checksum de las claves. No cambiar. |
+| `JWT_SECRET` | Firma de las sesiones del panel |
+| `ADMIN_PASSWORD_HASH` | Hash bcrypt de la contrasena del panel |
+| `SESSION_DAYS` | Duracion de la sesion (7 por defecto) |
+| `MAX_LOGIN_FAILS` | Intentos antes de bloquear la IP (5) |
+| `LOCKOUT_MINUTES` | Duracion del bloqueo (15) |
+| `DB_PATH` | Ruta de la base SQLite |
+
+`bash scripts/generar-claves.sh` las genera todas.
+
+## Mantenimiento
+
+```bash
+pm2 logs stageconnect-web        # ver logs
+pm2 restart stageconnect-web     # reiniciar
+pm2 status                       # estado
+
+# Copia de seguridad de la base de datos
+sqlite3 /var/lib/stageconnect/stageconnect.db ".backup '/root/copia-$(date +%F).db'"
+```
+
+La base se limpia sola cada hora: caduca licencias vencidas, purga sesiones
+antiguas e intentos de login de mas de un dia.
+
+---
+
+entikrecords.com

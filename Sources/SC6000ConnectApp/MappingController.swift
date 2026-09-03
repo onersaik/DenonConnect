@@ -230,10 +230,10 @@ final class MappingController: ObservableObject {
     private static let sourceDefaultsKey = "sc.mapping.midiSource"
 
     static let defaultKeyBindings: [MappingAction: KeyBinding] = [
-        .modeAuto:           KeyBinding(character: "1", keyCode: 18),
-        .modeDenon:          KeyBinding(character: "2", keyCode: 19),
-        .modePioneer:        KeyBinding(character: "3", keyCode: 20),
-        .modeDual:           KeyBinding(character: "4", keyCode: 21),
+        .modeDual:           KeyBinding(character: "1", keyCode: 18),
+        .modeAuto:           KeyBinding(character: "2", keyCode: 19),
+        .modeDenon:          KeyBinding(character: "3", keyCode: 20),
+        .modePioneer:        KeyBinding(character: "4", keyCode: 21),
         .modeTodos:          KeyBinding(character: "5", keyCode: 23),
         .layoutLarge:        KeyBinding(character: "g", keyCode: 5),
         .layoutSmall:        KeyBinding(character: "p", keyCode: 35),
@@ -263,6 +263,10 @@ final class MappingController: ObservableObject {
 
     func attach(outputs: OutputController) {
         self.outputs = outputs
+        // Si setVisibleRows corrió antes del attach, reenvía el filtro Dual/SMPTE.
+        if !visibleRowIDs.isEmpty {
+            outputs.setVisibleDeckIDs(visibleRowIDs)
+        }
     }
 
     func setVisibleRows(_ ids: [String]) {
@@ -347,7 +351,24 @@ final class MappingController: ObservableObject {
             for (action, binding) in Self.defaultKeyBindings where map[action] == nil {
                 map[action] = binding
             }
-            keyBindings = map
+            // Cabecera Dual/Auto/Denon/Pioneer/Todos = teclas 1–5. Si el usuario
+            // no personalizó esos cinco (fábrica antigua: 1=Auto, 4=Dual), se migran.
+            let oldModes: [MappingAction: KeyBinding] = [
+                .modeAuto:    KeyBinding(character: "1", keyCode: 18),
+                .modeDenon:   KeyBinding(character: "2", keyCode: 19),
+                .modePioneer: KeyBinding(character: "3", keyCode: 20),
+                .modeDual:    KeyBinding(character: "4", keyCode: 21),
+                .modeTodos:   KeyBinding(character: "5", keyCode: 23),
+            ]
+            if oldModes.allSatisfy({ map[$0.key] == $0.value }) {
+                for (action, binding) in Self.defaultKeyBindings where oldModes[action] != nil {
+                    map[action] = binding
+                }
+                keyBindings = map
+                persist()
+            } else {
+                keyBindings = map
+            }
         }
         if let data = UserDefaults.standard.data(forKey: Self.midiDefaultsKey),
            let decoded = try? JSONDecoder().decode([String: MIDIBinding].self, from: data) {

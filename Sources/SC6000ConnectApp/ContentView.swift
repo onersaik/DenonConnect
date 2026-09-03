@@ -11,17 +11,21 @@ enum AppMode: String, CaseIterable, Identifiable {
     case auto = "Auto"
     case denon = "Denon"
     case pioneer = "Pioneer"
-    case todos = "Todos"
     case serato = "Serato"
     case virtualdj = "VDJ"
+    case rekordbox = "rekordbox"
+    case traktor = "Traktor"
+    case todos = "Todos"
 
     var id: String { rawValue }
 
-    /// Dual = hasta 4 CDJ + capas Denon. Todos = también Serato/VDJ.
+    /// Dual = hasta 4 CDJ + capas Denon. Todos = también software / export.
     var showsDenon: Bool { self == .denon || self == .dual || self == .todos }
     var showsPioneer: Bool { self == .pioneer || self == .dual || self == .todos }
     var showsSerato: Bool { self == .serato || self == .todos }
     var showsVDJ: Bool { self == .virtualdj || self == .todos }
+    var showsRekordbox: Bool { self == .rekordbox || self == .todos }
+    var showsTraktor: Bool { self == .traktor || self == .todos }
 }
 
 enum DeckLayout { case large, small, master }
@@ -38,6 +42,7 @@ struct ContentView: View {
     @EnvironmentObject var labels: DeckLabelStore
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var localization: LocalizationStore
+    @EnvironmentObject var updates: AppUpdateStore
     @Environment(\.openWindow) private var openWindow
 
     private var mode: AppMode {
@@ -65,15 +70,28 @@ struct ContentView: View {
         let pioneer = pioneerFamilyCount > 0
         let serato = software.seratoLiveCount > 0
         let vdj = software.vdjLiveCount > 0
-        let families = [denon, pioneer, serato, vdj].filter { $0 }.count
+        let rekordbox = rekordboxLiveCount > 0
+        let families = [denon, pioneer, serato, vdj, rekordbox].filter { $0 }.count
         if families > 1 {
-            return (serato || vdj) ? .todos : .dual
+            return (serato || vdj || rekordbox) ? .todos : .dual
         }
         if serato { return .serato }
         if vdj { return .virtualdj }
+        if rekordbox { return .rekordbox }
         if pioneer { return .pioneer }
         if denon { return .denon }
         return .dual
+    }
+
+    /// Export rekordbox en Pro DJ Link (no CDJ hardware). Sin fingir pistas.
+    private var rekordboxLiveCount: Int {
+        rekordboxLAN.count
+    }
+
+    private var rekordboxLAN: [ProDJLinkDevice] {
+        proDJLink.devices
+            .filter { $0.isRekordboxExport && $0.trackLoaded && !$0.isOwnVirtualCDJ && !$0.isMixer }
+            .sorted { $0.playerNumber < $1.playerNumber }
     }
 
     private var denonLoadedCount: Int {
@@ -81,8 +99,12 @@ struct ContentView: View {
         if testLink.roster.denonOn {
             n += testLink.roster.denonLoadedCount
         }
-        n += manager.devices.filter { !$0.isDenonSimulator }.reduce(0) { acc, device in
-            acc + device.decks.filter(\.songLoaded).count
+        // Familia Denon en Auto = señal real (pista/reproduciendo), igual que Pioneer.
+        // Un SC6000 solo encendido/conectado no debe forzar Auto a Dual por sí solo;
+        // la fila "conectado sin pista" se sigue mostrando (shouldShowRealDenon) una
+        // vez el modo ya es Denon/Dual, esto solo afecta la detección de familia.
+        for device in manager.devices where device.isDenonPlayerUnit {
+            n += device.decks.filter { shouldShowRealDenon(device, deck: $0) }.count
         }
         return n
     }
@@ -100,8 +122,9 @@ struct ContentView: View {
         return pioneerFamilyCount
     }
 
+    /// CDJ/XDJ de LAN. El export rekordbox va al modo rekordbox, no a Dual/Pioneer.
     private var lanPioneerWithTrack: [ProDJLinkDevice] {
-        proDJLink.devices.filter(\.isLANPlayerWithTrack)
+        proDJLink.devices.filter { $0.isLANPlayerWithTrack && !$0.isRekordboxExport }
             .sorted { $0.playerNumber < $1.playerNumber }
     }
 
@@ -124,10 +147,14 @@ struct ContentView: View {
         return true
     }
 
-    /// SC6000 de LAN con pista. El overlay TEST no cuenta; el título puede
-    /// llegar tarde (StateMap) y no debe ocultar el hardware.
-    private func isRealLoadedDenon(_ device: StageLinqDevice, deck: DeckState) -> Bool {
-        !device.isDenonSimulator && deck.songLoaded
+    /// SC6000 de LAN. Con pista, en play, o al menos descubierto/conectado
+    /// (sin pista aún): el hardware debe verse; no filtrar por SIM ni exigir SongLoaded.
+    private func shouldShowRealDenon(_ device: StageLinqDevice, deck: DeckState) -> Bool {
+        guard !device.isDenonSimulator else { return false }
+        if deck.songLoaded { return true }
+        if deck.playState == .playing { return true }
+        if !deck.trackTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return true }
+        return false
     }
 
     /// Cada entrada guarda el objeto observable original, no una copia: así la
@@ -142,6 +169,7 @@ struct ContentView: View {
         let showPioneer = effectiveMode.showsPioneer
         let showSerato = effectiveMode.showsSerato
         let showVDJ = effectiveMode.showsVDJ
+        let showRekordbox = effectiveMode.showsRekordbox
 
         if showDenon {
             if testLink.roster.denonOn {
@@ -163,8 +191,14 @@ struct ContentView: View {
                     rows.append(.denonTest(layer: idx))
                 }
             }
-            for device in manager.devices {
-                for deck in device.decks where isRealLoadedDenon(device, deck: deck) {
+            for device in manager.devices where device.isDenonPlayerUnit {
+                var added = false
+                for deck in device.decks where shouldShowRealDenon(device, deck: deck) {
+                    rows.append(.denon(deck: deck, device: device))
+                    added = true
+                }
+                // HOWDY/TCP vivo sin SongLoaded: una fila para que el SC6000 Wi‑Fi se vea.
+                if !added, let deck = device.decks.first {
                     rows.append(.denon(deck: deck, device: device))
                 }
             }
@@ -188,6 +222,12 @@ struct ContentView: View {
                 rows.append(.software(deck))
             }
         }
+        if showRekordbox {
+            for device in rekordboxLAN {
+                rows.append(.pioneer(device: device))
+            }
+        }
+        // Traktor: modo filtro + presencia local. Sin protocolo de pista → sin filas inventadas.
         return rows
     }
 
@@ -245,6 +285,7 @@ struct ContentView: View {
                 .environmentObject(software)
                 .environmentObject(theme)
                 .environmentObject(localization)
+                .environmentObject(updates)
         }
     }
 
@@ -404,17 +445,8 @@ struct ContentView: View {
             .filter { !$0.isEmpty }
     }
 
-    /// Dual / Auto / Denon / Pioneer / Todos. Serato y VDJ solo si hay decks o el modo está activo.
-    private var headerModes: [AppMode] {
-        var modes: [AppMode] = [.dual, .auto, .denon, .pioneer, .todos]
-        if software.seratoLiveCount > 0 || mode == .serato { modes.append(.serato) }
-        if software.vdjLiveCount > 0 || mode == .virtualdj { modes.append(.virtualdj) }
-        return modes
-    }
-
-    private var headerPickerWidth: CGFloat {
-        headerModes.count > 5 ? 460 : 380
-    }
+    /// Siempre visibles: Dual / Auto / Denon / Pioneer / Serato / VDJ / rekordbox / Traktor / Todos.
+    private var headerModes: [AppMode] { AppMode.allCases }
 
     @ViewBuilder
     private var discoveryBanner: some View {
@@ -431,13 +463,15 @@ struct ContentView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 10) {
+        // Force refresh Theme.* when day/night flips (static colors read isDarkGlobal).
+        FlowLayout(spacing: 8, lineSpacing: 6, trailingFrom: 1) {
             VStack(alignment: .leading, spacing: 1) {
                 Text("STAGE CONNECT")
                     .font(.system(size: 13, weight: .bold))
                     .tracking(1.6)
                     .foregroundColor(Theme.textPrimary)
                     .noClip()
+                    .id(theme.isDark) // invalida Theme.* al cambiar día/noche
                 HStack(spacing: 10) {
                     SourceCount(label: "DENON", count: denonLoadedCount, color: Theme.accent)
                     SourceCount(label: "PIONEER", count: pioneerRowCount, color: Theme.cyan)
@@ -447,28 +481,42 @@ struct ContentView: View {
                     if software.vdjLiveCount > 0 {
                         SourceCount(label: "VDJ", count: software.vdjLiveCount, color: Theme.purple)
                     }
+                    if rekordboxLiveCount > 0 || software.rekordboxAppRunning {
+                        SourceCount(label: "RB", count: rekordboxLiveCount, color: Theme.cyan)
+                    }
+                    if software.traktorAppRunning {
+                        SourceCount(label: "TRAKTOR", count: 0, color: Theme.yellow)
+                    }
                 }
             }
-
-            Spacer()
+            .fixedSize()
 
             HStack(spacing: 1) {
                 stageViewButton("CDJ", mode: .large, help: "Aguja al centro, zoom de pista. Show / booth. Atajo: G")
                 stageViewButton("Overview", mode: .small, help: "Pista entera por fila. El MASTER de arriba sí hace zoom. Atajo: P")
                 stageViewButton("Master", mode: .master, help: "Solo el reproductor que manda el MASTER. Atajo: V")
             }
+            .fixedSize()
 
             waveformZoomChip
+                .fixedSize()
 
-            Picker("", selection: $mapping.mode) {
+            HStack(spacing: 1) {
                 ForEach(headerModes) { m in
-                    Text(m.rawValue).tag(m)
+                    Button { mapping.mode = m } label: {
+                        Text(m.rawValue)
+                            .font(.system(size: 9, weight: .bold))
+                            .tracking(0.2)
+                            .foregroundColor(mode == m ? .black : Theme.textSecondary)
+                            .padding(.horizontal, 7)
+                            .frame(height: 24)
+                            .background(Rectangle().fill(mode == m ? Theme.accent : Theme.buttonBg))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Fuente: \(m.rawValue)")
                 }
             }
-            .pickerStyle(.segmented)
-            .frame(minWidth: 200, idealWidth: headerPickerWidth, maxWidth: headerPickerWidth)
-            .labelsHidden()
-            .layoutPriority(0)
+            .fixedSize()
 
             Button {
                 if outputs.ltcEnabled {
@@ -479,7 +527,7 @@ struct ContentView: View {
             } label: {
                 HStack(spacing: 5) {
                     Circle()
-                        .fill(outputs.ltcEnabled ? Theme.ledGreen : Color.primary.opacity(0.30))
+                        .fill(outputs.ltcEnabled ? Theme.ledGreen : Theme.textTertiary.opacity(0.45))
                         .frame(width: 7, height: 7)
                         .shadow(color: outputs.ltcEnabled ? Theme.ledGreen.opacity(0.9) : .clear, radius: 3)
                     VStack(alignment: .leading, spacing: 0) {
@@ -610,11 +658,12 @@ struct ContentView: View {
         .padding(.trailing, 12)
         .padding(.top, 4)
         .padding(.bottom, 6)
-        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.header)
         .overlay(alignment: .bottom) {
             Rectangle().fill(Theme.rowDivider).frame(height: 1)
         }
+        .id(theme.isDark)
     }
 
     private func headerMapToggle(title: String, on: Bool, help: String, action: @escaping () -> Void) -> some View {
@@ -727,110 +776,84 @@ private struct SourceCount: View {
 
 private struct EmptyStateView: View {
     let mode: AppMode
-    @EnvironmentObject var manager: StageLinqManager
-    @EnvironmentObject var proDJLink: ProDJLinkManager
-    @EnvironmentObject var software: SoftwareDJManager
 
     var body: some View {
         VStack(spacing: 12) {
             Image(systemName: "dot.radiowaves.left.and.right")
                 .font(.system(size: 38))
                 .foregroundColor(Theme.textTertiary)
-            Text(searchText)
+            Text("Buscando reproductores en la red…")
                 .font(.system(size: 14, weight: .medium))
                 .foregroundColor(Theme.textSecondary)
-            if !bindLines.isEmpty {
-                ForEach(bindLines, id: \.self) { line in
-                    Text(line)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(Theme.yellow)
-                        .multilineTextAlignment(.center)
-                }
-            }
-            if !seenLines.isEmpty {
-                Text("Vistos, sin pista cargada:")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(Theme.textSecondary)
-                ForEach(seenLines, id: \.self) { line in
-                    Text(line)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(Theme.cyan)
-                }
-            }
-            Text("Mismo switch o misma red WiFi que el Mac.\nSi usas WiFi, desactiva el aislamiento de AP (client isolation).\nAcepta el permiso de red local de macOS.\nSi 50000/50001/50002 están ocupados: cierra rekordbox u otra copia.\nSi 51337 está ocupado: cierra otra copia de STAGE CONNECT.")
-                .font(.system(size: 11))
-                .foregroundColor(Theme.textTertiary)
-                .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private var bindLines: [String] {
-        [manager.listenWarning, proDJLink.listenWarning]
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-    }
-
-    private var seenLines: [String] {
-        let denon = manager.devices.map { device -> String in
-            let name = DeckDisplayBuilder.displayDeviceName(device.name)
-            let tcp: String
-            switch device.connectionState {
-            case .discovered, .connecting:
-                tcp = "conectado / esperando pista"
-            case .connected:
-                tcp = device.services["StateMap"] == nil
-                    ? "conectado / esperando pista"
-                    : "conectado, sin pista"
-            case .failed: tcp = "TCP falló"
-            }
-            return "\(name) · \(tcp)"
-        }
-        let pioneer = proDJLink.devices
-            .filter { !$0.isOwnVirtualCDJ && !$0.isMixer }
-            .map { device -> String in
-                let extra = device.hasStatus ? "conectado, sin pista" : "en red, esperando estado"
-                return "\(DeckDisplayBuilder.productPioneerLabel(player: Int(device.playerNumber), model: device.model)) · \(extra)"
-            }
-        return denon + pioneer
-    }
-
-    private var searchText: String {
-        // Anuncio HOWDY / keepalive: no es “buscando”.
-        if !seenLines.isEmpty { return "conectado / esperando pista" }
-        if !manager.devices.isEmpty, mode != .pioneer {
-            return "conectado / esperando pista"
-        }
-        switch mode {
-        case .denon: return "Buscando Denon SC6000…"
-        case .pioneer: return "Buscando Pioneer CDJ…"
-        case .serato: return software.seratoStatus
-        case .virtualdj: return software.vdjStatus
-        default: return "Buscando reproductores en la red…"
-        }
+        // mode reservado: mismo copy en Dual/Denon/Pioneer/software.
+        .accessibilityLabel(mode.rawValue)
     }
 }
 
 private struct CreditsFooter: View {
+    @EnvironmentObject var updates: AppUpdateStore
+    @EnvironmentObject var theme: ThemeStore
+
     var body: some View {
-        HStack {
+        HStack(spacing: 10) {
             Text("entikrecords.com")
                 .font(.system(size: 9, weight: .semibold))
                 .tracking(1.0)
                 .foregroundColor(Theme.textTertiary)
-            Spacer()
+
+            Spacer(minLength: 8)
+
+            if updates.isDownloading {
+                Text(String(format: "Descargando %.0f%%", updates.downloadProgress * 100))
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundColor(Theme.textSecondary)
+                    .noClip()
+            } else if updates.hasUpdate, let remote = updates.available {
+                Text(updates.bannerText)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundColor(Theme.accent)
+                    .noClip()
+                Button {
+                    updates.installAvailableUpdate()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.down.circle.fill")
+                            .font(.system(size: 10))
+                        Text("ACTUALIZAR")
+                            .font(.system(size: 9, weight: .bold))
+                            .tracking(0.6)
+                            .noClip()
+                    }
+                    .foregroundColor(.black)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(Rectangle().fill(Theme.accent))
+                }
+                .buttonStyle(.plain)
+                .help("Descarga v\(remote.version) a Descargas y abre el instalador")
+            }
+
+            Text("v\(AppUpdateStore.currentVersion)")
+                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .foregroundColor(Theme.textTertiary.opacity(0.7))
+                .noClip()
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 4)
+        .padding(.vertical, 5)
         .background(Theme.background)
         .overlay(alignment: .top) {
             Rectangle().fill(Theme.rowDivider).frame(height: 1)
         }
+        .id(theme.isDark)
     }
 }
 
-/// Quita el chrome gris de macOS: barra de título transparente y fondo negro.
+/// Fondo de ventana alineado al tema (día/noche); barra de título transparente.
 private struct BlackWindowConfigurator: NSViewRepresentable {
+    @EnvironmentObject var theme: ThemeStore
+
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
         DispatchQueue.main.async { apply(view.window) }
@@ -843,7 +866,10 @@ private struct BlackWindowConfigurator: NSViewRepresentable {
 
     private func apply(_ window: NSWindow?) {
         guard let window else { return }
-        window.backgroundColor = .clear
+        let dark = ThemeStore.isDarkGlobal
+        window.backgroundColor = dark
+            ? NSColor.black
+            : NSColor(calibratedRed: 0.94, green: 0.94, blue: 0.95, alpha: 1)
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.isMovableByWindowBackground = true
@@ -900,31 +926,34 @@ struct DenonDeckRow: View {
     var onFocusMaster: () -> Void = {}
     @EnvironmentObject var outputs: OutputController
     @EnvironmentObject var testLink: TestLinkReceiver
+    @EnvironmentObject var testPlayback: TestLinkPlayback
 
     var body: some View {
-        let overlay = testLink.roster.denonOn && device.isDenonSimulator
-            ? testLink.snapshot?.deck(deck.id - 1) : nil
-        let display = denonDisplay(overlay: overlay)
-        let ltcID = device.isDenonSimulator
-            ? DeckDisplayBuilder.testDenonID(deck.id - 1)
-            : display.id
-        PlayerDeckRow(
-            deck: display,
-            isLarge: isLarge,
-            isHero: isHero,
-            fillsAvailable: fillsAvailable,
-            isLTCSource: outputs.isRowLTCLit(ltcID),
-            isMasterFocus: outputs.isMasterFocus(ltcID),
-            isLocked: outputs.isDeckLocked(ltcID),
-            isHot: outputs.isWaveformHot(ltcID),
-            ltcAutoFollow: outputs.ltcAutoFollow,
-            onSelectLTC: { outputs.toggleRowLTC(ltcID) },
-            onPinMaster: {
-                outputs.pinMaster(to: ltcID)
-                onFocusMaster()
-            },
-            onToggleLock: { outputs.toggleDeckLock(ltcID) }
-        )
+        // 30 fps: interpola liveBeat entre paquetes BeatInfo (UI a ≤20 Hz).
+        TimelineView(.periodic(from: .now, by: 1.0 / 30.0)) { _ in
+            let overlay = testLink.roster.denonOn && device.isDenonSimulator
+                ? testPlayback.snapshot?.deck(deck.id - 1) : nil
+            let display = denonDisplay(overlay: overlay)
+            let ltcID = device.isDenonSimulator
+                ? DeckDisplayBuilder.testDenonID(deck.id - 1)
+                : display.id
+            PlayerDeckRow(
+                deck: display,
+                isLarge: isLarge,
+                isHero: isHero,
+                fillsAvailable: fillsAvailable,
+                isLTCSource: outputs.isRowLTCLit(ltcID),
+                isMasterFocus: outputs.isMasterFocus(ltcID),
+                isLocked: outputs.isDeckLocked(ltcID),
+                isHot: outputs.isWaveformHot(ltcID),
+                ltcAutoFollow: outputs.ltcAutoFollow,
+                onSelectLTC: { outputs.toggleRowLTC(ltcID) },
+                onPinMaster: {
+                    outputs.pinMaster(to: ltcID)
+                },
+                onToggleLock: { outputs.toggleDeckLock(ltcID) }
+            )
+        }
     }
 
     private func denonDisplay(overlay: TestLinkDeck?) -> DeckDisplay {
@@ -938,7 +967,7 @@ struct DenonDeckRow: View {
             ?? (outputs.isRowLTCLit(ltcID) && outputs.ltcEnabled
                 ? outputs.ltcTimecode
                 : nil)
-        display.signalAt = overlay != nil ? testLink.lastPacketAt : deck.lastPacketAt
+        display.signalAt = overlay != nil ? testPlayback.lastPacketAt : deck.lastPacketAt
         return display
     }
 }
@@ -952,24 +981,26 @@ struct PioneerDeckRow: View {
     @EnvironmentObject var outputs: OutputController
 
     var body: some View {
-        let display = pioneerDisplay
-        PlayerDeckRow(
-            deck: display,
-            isLarge: isLarge,
-            isHero: isHero,
-            fillsAvailable: fillsAvailable,
-            isLTCSource: outputs.isRowLTCLit(display.id),
-            isMasterFocus: outputs.isMasterFocus(display.id),
-            isLocked: outputs.isDeckLocked(display.id),
-            isHot: outputs.isWaveformHot(display.id),
-            ltcAutoFollow: outputs.ltcAutoFollow,
-            onSelectLTC: { outputs.toggleRowLTC(display.id) },
-            onPinMaster: {
-                outputs.pinMaster(to: display.id)
-                onFocusMaster()
-            },
-            onToggleLock: { outputs.toggleDeckLock(display.id) }
-        )
+        // 30 fps: interpola playhead entre paquetes 50001/status.
+        TimelineView(.periodic(from: .now, by: 1.0 / 30.0)) { _ in
+            let display = pioneerDisplay
+            PlayerDeckRow(
+                deck: display,
+                isLarge: isLarge,
+                isHero: isHero,
+                fillsAvailable: fillsAvailable,
+                isLTCSource: outputs.isRowLTCLit(display.id),
+                isMasterFocus: outputs.isMasterFocus(display.id),
+                isLocked: outputs.isDeckLocked(display.id),
+                isHot: outputs.isWaveformHot(display.id),
+                ltcAutoFollow: outputs.ltcAutoFollow,
+                onSelectLTC: { outputs.toggleRowLTC(display.id) },
+                onPinMaster: {
+                    outputs.pinMaster(to: display.id)
+                },
+                onToggleLock: { outputs.toggleDeckLock(display.id) }
+            )
+        }
     }
 
     private var pioneerDisplay: DeckDisplay {
@@ -991,7 +1022,7 @@ struct PioneerTestRow: View {
     var fillsAvailable: Bool = false
     var onFocusMaster: () -> Void = {}
     @EnvironmentObject var outputs: OutputController
-    @EnvironmentObject var testLink: TestLinkReceiver
+    @EnvironmentObject var testPlayback: TestLinkPlayback
 
     var body: some View {
         let display = pioneerTestDisplay
@@ -1008,21 +1039,20 @@ struct PioneerTestRow: View {
             onSelectLTC: { outputs.toggleRowLTC(display.id) },
             onPinMaster: {
                 outputs.pinMaster(to: display.id)
-                onFocusMaster()
             },
             onToggleLock: { outputs.toggleDeckLock(display.id) }
         )
     }
 
     private var pioneerTestDisplay: DeckDisplay {
-        let overlay = testLink.snapshot?.decks.first(where: { $0.loaded && $0.playing })
-            ?? testLink.snapshot?.firstLoadedDeck()
+        let overlay = testPlayback.snapshot?.decks.first(where: { $0.loaded && $0.playing })
+            ?? testPlayback.snapshot?.firstLoadedDeck()
         var display = DeckDisplayBuilder.testPioneer(overlay: overlay)
         display.ltcTimecode = outputs.ltcDeckTimecode[display.id]
             ?? (outputs.isRowLTCLit(display.id) && outputs.ltcEnabled
                 ? outputs.ltcTimecode
                 : nil)
-        display.signalAt = overlay != nil ? testLink.lastPacketAt : .distantPast
+        display.signalAt = overlay != nil ? testPlayback.lastPacketAt : .distantPast
         return display
     }
 }
@@ -1035,7 +1065,7 @@ struct DenonTestRow: View {
     var fillsAvailable: Bool = false
     var onFocusMaster: () -> Void = {}
     @EnvironmentObject var outputs: OutputController
-    @EnvironmentObject var testLink: TestLinkReceiver
+    @EnvironmentObject var testPlayback: TestLinkPlayback
 
     var body: some View {
         let display = denonTestDisplay
@@ -1052,20 +1082,19 @@ struct DenonTestRow: View {
             onSelectLTC: { outputs.toggleRowLTC(display.id) },
             onPinMaster: {
                 outputs.pinMaster(to: display.id)
-                onFocusMaster()
             },
             onToggleLock: { outputs.toggleDeckLock(display.id) }
         )
     }
 
     private var denonTestDisplay: DeckDisplay {
-        let overlay = testLink.snapshot?.deck(layer)
+        let overlay = testPlayback.snapshot?.deck(layer)
         var display = DeckDisplayBuilder.testDenon(layer: layer, overlay: overlay)
         display.ltcTimecode = outputs.ltcDeckTimecode[display.id]
             ?? (outputs.isRowLTCLit(display.id) && outputs.ltcEnabled
                 ? outputs.ltcTimecode
                 : nil)
-        display.signalAt = overlay != nil ? testLink.lastPacketAt : .distantPast
+        display.signalAt = overlay != nil ? testPlayback.lastPacketAt : .distantPast
         return display
     }
 }
@@ -1093,7 +1122,6 @@ struct SoftwareDeckRow: View {
             onSelectLTC: { outputs.toggleRowLTC(display.id) },
             onPinMaster: {
                 outputs.pinMaster(to: display.id)
-                onFocusMaster()
             },
             onToggleLock: { outputs.toggleDeckLock(display.id) }
         )
@@ -1248,15 +1276,48 @@ enum DeckDisplayBuilder {
         let title = TrackNaming.cleanTitle(overlay?.title ?? deck.trackTitle)
         let artist = overlay?.artist ?? deck.trackArtist
         let bpm = MusicalClock.bpm(overlay?.bpm ?? 0, deck.bpm, deck.beatBpm)
-        let progress = overlay?.progress ?? deck.beatProgress
-        let length = overlay?.duration ?? (deck.trackLength > 0 ? deck.trackLength : nil)
-        let elapsed: Double? = {
-            if let o = overlay { return o.position }
-            if let p = progress, let l = length { return p * l }
+        let length: Double? = {
+            if let d = overlay?.duration { return d }
+            if deck.trackLength > 0 { return deck.trackLength }
+            // Derivar de BeatInfo: totalBeats × 60 / BPM
+            let useBpm = deck.beatBpm > 0 ? deck.beatBpm : deck.bpm
+            if deck.totalBeats > 0, useBpm > 0 {
+                let derived = deck.totalBeats * 60.0 / useBpm
+                if derived > 5, derived < 3600 { return derived }
+            }
             return nil
         }()
         let playing = overlay?.playing ?? (deck.playState == .playing)
-        let loaded = overlay?.loaded ?? (deck.songLoaded && !title.isEmpty)
+        // Interpola BeatInfo entre paquetes (TimelineView 30 fps).
+        let elapsed: Double? = {
+            if let o = overlay { return o.position }
+            if playing, deck.beatReceivedAt > .distantPast {
+                let beat = deck.liveBeat > 0 ? deck.liveBeat : deck.currentBeat
+                let bpm = deck.beatBpm > 0 ? deck.beatBpm : deck.bpm
+                if beat > 0, bpm > 0 {
+                    let dt = min(Date().timeIntervalSince(deck.beatReceivedAt), 2.0)
+                    let rate = deck.speed > 0.05 ? deck.speed : 1.0
+                    var e = (beat + dt * bpm / 60.0 * rate) * 60.0 / bpm
+                    if let l = length, l > 0 { e = min(max(e, 0), l) }
+                    return e
+                }
+            }
+            guard let e = deck.resolvedElapsed else {
+                if let p = deck.beatProgress, let l = length, l > 0 { return p * l }
+                return nil
+            }
+            return e
+        }()
+        let progress: Double? = {
+            if let o = overlay?.progress { return o }
+            guard let e = elapsed, let l = length, l > 0 else {
+                return deck.beatProgress
+            }
+            return min(max(e / l, 0), 1)
+        }()
+        // Título StateMap sin SongLoaded=true: igual es pista cargada.
+        let loaded = overlay?.loaded
+            ?? (deck.songLoaded || !title.isEmpty || (length ?? 0) > 0)
         let overlayKey = overlay?.key ?? ""
         let key = MusicalKey.resolved(
             raw: overlayKey.isEmpty ? deck.trackKey : overlayKey,
@@ -1266,7 +1327,9 @@ enum DeckDisplayBuilder {
         let state = playing ? "Play" : stateLabel(deck.playState)
 
         var display = DeckDisplay(
-            id: "denon-\(device.id)-\(deck.id)",
+            id: device.isDenonSimulator
+                ? testDenonID(deck.id - 1)
+                : "denon-\(device.id)-\(deck.id)",
             source: .denon,
             label: productDenonLabel(layer: deck.id),
             title: title,
@@ -1297,10 +1360,10 @@ enum DeckDisplayBuilder {
             cuePositionFraction: overlay?.cueFractions.first ?? frac(deck.cuePosition, length: length),
             loopInFraction: overlay?.loopInFraction ?? frac(deck.loopInPosition, length: length),
             loopOutFraction: overlay?.loopOutFraction ?? frac(deck.loopOutPosition, length: length),
-            peaks: overlay?.peaks ?? [],
-            peaksLow: overlay?.peaksLow ?? [],
-            peaksMid: overlay?.peaksMid ?? [],
-            peaksHigh: overlay?.peaksHigh ?? []
+            peaks: overlay?.peaks ?? deck.peaks,
+            peaksLow: overlay?.peaksLow ?? deck.peaksLow,
+            peaksMid: overlay?.peaksMid ?? deck.peaksMid,
+            peaksHigh: overlay?.peaksHigh ?? deck.peaksHigh
         )
         display.extraCueFractions = overlay?.cueFractions ?? []
         display.signalAt = overlay != nil ? Date() : deck.lastPacketAt
@@ -1331,17 +1394,25 @@ enum DeckDisplayBuilder {
         let overlayTitle = overlay?.title ?? ""
         let title = TrackNaming.cleanTitle(overlayTitle.isEmpty ? device.trackTitle : overlayTitle)
         let loaded = overlay?.loaded ?? device.trackLoaded
-        let resolvedHead = device.resolvedPlayhead
         let bpm = MusicalClock.bpm(overlay?.bpm ?? 0, device.effectiveBPM, device.trackBPM)
+        let length = overlay?.duration ?? (device.trackLength > 0 ? device.trackLength : nil)
+        let playing = overlay?.playing ?? (device.trackLoaded && device.isPlaying)
+        // Interpola playhead 50001/status entre paquetes (TimelineView 30 fps).
+        let elapsed: Double? = {
+            if let ov = overlay?.position { return ov }
+            guard let raw = device.resolvedPlayhead ?? (device.hasPosition ? device.playhead : nil) else {
+                return nil
+            }
+            guard playing, let len = length, len > 0 else { return raw }
+            guard device.positionReceivedAt > .distantPast else { return raw }
+            let dt = min(Date().timeIntervalSince(device.positionReceivedAt), 2.0)
+            return min(raw + max(0, dt), len)
+        }()
         let progress: Double? = {
             if let o = overlay?.progress { return o }
-            if device.trackLength > 0, let head = resolvedHead {
-                return min(max(head / device.trackLength, 0), 1)
-            }
-            return nil
+            guard let el = elapsed, let len = length, len > 0 else { return nil }
+            return min(max(el / len, 0), 1)
         }()
-        let length = overlay?.duration ?? (device.trackLength > 0 ? device.trackLength : nil)
-        let elapsed = overlay?.position ?? resolvedHead
         let pitch: Double? = {
             if let fromOverlay = Self.publishedPitch(overlay?.pitch) { return fromOverlay }
             return Self.publishedPitch(device.pitchPercent)
@@ -1353,7 +1424,6 @@ enum DeckDisplayBuilder {
             title: title,
             artist: artist
         )
-        let playing = overlay?.playing ?? (device.trackLoaded && device.isPlaying)
         let state = playing ? "Play" : device.playModeLabel
 
         var display = DeckDisplay(

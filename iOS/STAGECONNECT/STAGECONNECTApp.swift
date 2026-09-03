@@ -16,21 +16,22 @@ struct STAGECONNECTApp: App {
                 .environmentObject(manager)
                 .environmentObject(proDJLink)
                 .environmentObject(testLink)
+                .environmentObject(testLink.playback)
                 .environmentObject(license)
                 .preferredColorScheme(.dark)
                 .onAppear {
                     license.refresh()
-                    if license.isUnlocked {
+                    // LAN siempre: el overlay de licencia no apaga descubrimiento.
+                    manager.start()
+                    proDJLink.start()
+                    testLink.start()
+                }
+                .onChange(of: license.isUnlocked) { unlocked in
+                    // Sin unlock solo hay ActivationView; Dual/SMPTE/UDP siguen.
+                    if unlocked {
                         manager.start()
                         proDJLink.start()
                         testLink.start()
-                    }
-                }
-                .onChange(of: license.isUnlocked) { unlocked in
-                    if unlocked {
-                        manager.start(); proDJLink.start(); testLink.start()
-                    } else {
-                        manager.stop(); proDJLink.stop(); testLink.stop()
                     }
                 }
         }

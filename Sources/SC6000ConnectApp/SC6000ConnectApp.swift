@@ -2,6 +2,8 @@
 // Punto de entrada de la app SwiftUI.
 
 import SwiftUI
+import AppKit
+import Darwin
 import StageLinqKit
 
 @main
@@ -18,7 +20,18 @@ struct SC6000ConnectApp: App {
     @StateObject private var tracklist  = TracklistStore()
     @StateObject private var theme      = ThemeStore()
     @StateObject private var localization = LocalizationStore()
+    @StateObject private var updates    = AppUpdateStore()
     @State private var servicesStarted = false
+    private let networkRecovery = NetworkRecoveryMonitor()
+
+    /// Mantiene el flock de instancia única vivo hasta el exit del proceso.
+    private static var instanceLockFD: Int32 = -1
+
+    init() {
+        // SO_REUSEADDR en :50000/:51337 permite 2ª copia; Darwin reparte UDP y
+        // se pierden CDJ/SC6000. Una sola instancia Mac.
+        Self.ensureSingleInstance()
+    }
 
     var body: some Scene {
         WindowGroup("STAGE CONNECT") {
@@ -28,6 +41,7 @@ struct SC6000ConnectApp: App {
                 .environmentObject(outputs)
                 .environmentObject(artwork)
                 .environmentObject(testLink)
+                .environmentObject(testLink.playback)
                 .environmentObject(license)
                 .environmentObject(mapping)
                 .environmentObject(software)
@@ -35,16 +49,27 @@ struct SC6000ConnectApp: App {
                 .environmentObject(tracklist)
                 .environmentObject(theme)
                 .environmentObject(localization)
+                .environmentObject(updates)
                 .frame(minWidth: 980, minHeight: 640)
                 .preferredColorScheme(theme.isDark ? .dark : .light)
                 .onAppear {
                     license.refresh()
-                    if license.isUnlocked { startServices() }
+                    // LAN siempre: Dual/SMPTE/descubrimiento no esperan a connectapp.entikmedia.com.
+                    startServices()
+                    // Latido opcional: sin red / NXDOMAIN no toca la cabina (ver LicenseStore).
+                    license.verifyInBackground()
+                    updates.checkForUpdates()
                 }
                 .onChange(of: license.isUnlocked) { unlocked in
-                    if unlocked { startServices() } else { stopServices() }
+                    // LAN / Dual / SMPTE / descubrimiento no dependen de la licencia.
+                    // Sin unlock solo hay overlay ActivationView; no se apaga UDP.
+                    if unlocked { startServices() }
                 }
-                .onDisappear {
+                // No onDisappear→stop: cerrar la ventana principal (Monitor/Setlist
+                // siguen) mataba Dual/SMPTE/descubrimiento/TestLink. Solo al salir.
+                .onReceive(NotificationCenter.default.publisher(
+                    for: NSApplication.willTerminateNotification
+                )) { _ in
                     stopServices()
                 }
         }
@@ -61,12 +86,14 @@ struct SC6000ConnectApp: App {
                 .environmentObject(proDJLink)
                 .environmentObject(outputs)
                 .environmentObject(testLink)
+                .environmentObject(testLink.playback)
                 .environmentObject(software)
                 .environmentObject(labels)
                 .environmentObject(mapping)
                 .environmentObject(artwork)
                 .environmentObject(theme)
                 .environmentObject(localization)
+                .environmentObject(tracklist)
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentMinSize)
@@ -79,6 +106,7 @@ struct SC6000ConnectApp: App {
                 .environmentObject(manager)
                 .environmentObject(proDJLink)
                 .environmentObject(testLink)
+                .environmentObject(testLink.playback)
                 .environmentObject(software)
                 .environmentObject(theme)
                 .environmentObject(localization)
@@ -91,6 +119,7 @@ struct SC6000ConnectApp: App {
     private func startServices() {
         guard !servicesStarted else { return }
         servicesStarted = true
+        ProtocolLog.resetForLaunch()
         manager.start()
         proDJLink.start()
         testLink.start()
@@ -98,16 +127,59 @@ struct SC6000ConnectApp: App {
         mapping.attach(outputs: outputs)
         mapping.start()
         software.start()
+        networkRecovery.start(stageLinq: manager, proDJLink: proDJLink, outputs: outputs)
+        // Arranque: ráfaga HOWDY + keepalive por si el cable ya estaba.
+        manager.kickNetworkRecovery(reason: "arranque")
+        proDJLink.kickNetworkRecovery(reason: "arranque")
     }
 
     private func stopServices() {
         guard servicesStarted else { return }
         servicesStarted = false
+        networkRecovery.stop()
         mapping.stop()
         outputs.shutdown()
         software.stop()
         manager.stop()
         proDJLink.stop()
         testLink.stop()
+    }
+
+    private static func ensureSingleInstance() {
+        let bundleID = Bundle.main.bundleIdentifier ?? "com.entikrecords.stageconnect"
+        let me = ProcessInfo.processInfo.processIdentifier
+        let activateOpts: NSApplication.ActivationOptions = [
+            .activateAllWindows, .activateIgnoringOtherApps,
+        ]
+        let peers: () -> [NSRunningApplication] = {
+            NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+                .filter { $0.processIdentifier != me && !$0.isTerminated }
+        }
+
+        // Ya hay otra copia visible → enfocarla y salir (no tocar UDP).
+        if let primary = peers().first {
+            primary.activate(options: activateOpts)
+            exit(0)
+        }
+        // flock: carrera al abrir 2 copias a la vez (peers() aún vacío).
+        if !acquireInstanceLock() {
+            peers().first?.activate(options: activateOpts)
+            exit(0)
+        }
+    }
+
+    private static func acquireInstanceLock() -> Bool {
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("STAGE CONNECT", isDirectory: true)
+        try? FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
+        let path = support.appendingPathComponent("instance.lock").path
+        let fd = open(path, O_RDWR | O_CREAT, 0o644)
+        guard fd >= 0 else { return true }
+        if flock(fd, LOCK_EX | LOCK_NB) != 0 {
+            close(fd)
+            return false
+        }
+        instanceLockFD = fd
+        return true
     }
 }

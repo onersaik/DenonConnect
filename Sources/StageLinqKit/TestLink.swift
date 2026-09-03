@@ -503,15 +503,69 @@ public final class TestLinkPublisher {
     }
 }
 
+/// Playhead / BPM / waveform a alta frecuencia (TEST ≈ 60 Hz).
+/// Va aparte de `TestLinkReceiver` para que ContentView / Monitor no
+/// reconstruyan cabecera + FlowLayout en cada datagrama.
+/// `latest` es siempre fresco (LTC / OutputController). `snapshot` @Published
+/// va a ≤20 Hz para no tumbar SwiftUI a 60 Hz con waveforms RGB.
+public final class TestLinkPlayback: ObservableObject {
+    /// Siempre al día; no dispara SwiftUI.
+    public fileprivate(set) var latest: TestLinkSnapshot?
+    @Published public fileprivate(set) var snapshot: TestLinkSnapshot?
+    public fileprivate(set) var lastPacketAt = Date.distantPast
+    private var lastUIPublish = Date.distantPast
+    private static let uiMinInterval: TimeInterval = 1.0 / 20.0
+
+    fileprivate func ingest(_ frame: TestLinkSnapshot, at packetAt: Date) {
+        latest = frame
+        lastPacketAt = packetAt
+        let due = packetAt.timeIntervalSince(lastUIPublish) >= Self.uiMinInterval
+        let metaChanged = snapshot.map { !Self.sameUIMeta($0, frame) } ?? true
+        if due || metaChanged {
+            lastUIPublish = packetAt
+            snapshot = frame
+        }
+    }
+
+    fileprivate func clear() {
+        latest = nil
+        snapshot = nil
+        lastPacketAt = .distantPast
+        lastUIPublish = .distantPast
+    }
+
+    private static func sameUIMeta(_ a: TestLinkSnapshot, _ b: TestLinkSnapshot) -> Bool {
+        guard a.denonOn == b.denonOn, a.pioneerOn == b.pioneerOn, a.decks.count == b.decks.count else {
+            return false
+        }
+        for i in a.decks.indices {
+            let x = a.decks[i], y = b.decks[i]
+            if x.loaded != y.loaded || x.playing != y.playing || x.isMaster != y.isMaster
+                || x.title != y.title || x.artist != y.artist
+                || x.peaks.count != y.peaks.count || x.peaksLow.count != y.peaksLow.count {
+                return false
+            }
+        }
+        return true
+    }
+}
+
 public final class TestLinkReceiver: ObservableObject {
-    @Published public private(set) var snapshot: TestLinkSnapshot?
+    /// Snapshot vivo; las filas TEST / Monitor lo observan, no el shell.
+    public let playback = TestLinkPlayback()
     @Published public private(set) var roster = TestLinkRoster()
     /// Solo cambia cuando entra/sale Denon/Pioneer o se carga/descarga una pista.
     /// ContentView usa esto para no reconstruir la lista 60 veces por segundo.
     @Published public private(set) var rosterTick: UInt64 = 0
 
+    /// Lectura sin invalidar SwiftUI (p. ej. tick LTC de OutputController).
+    public var snapshot: TestLinkSnapshot? { playback.latest }
+    public var lastPacketAt: Date { playback.lastPacketAt }
+
     private var sock: UDPSocket?
     private var stopped = false
+    /// Un solo bind :51341. start() de nuevo no abre otro socket.
+    private var started = false
     private let queue = DispatchQueue(label: "com.entikrecords.stageconnect.testlink", qos: .userInteractive)
     private var lastPeaks: [[UInt8]] = [[], []]
     private var lastLow: [[UInt8]] = [[], []]
@@ -521,22 +575,32 @@ public final class TestLinkReceiver: ObservableObject {
     private var lastBPMTitle: [String] = ["", ""]
     private var lastArtPath: [String] = ["", ""]
     private var lastArtJPEG: [String] = ["", ""]
-    public private(set) var lastPacketAt = Date.distantPast
     private var lastRosterKey = ""
+    /// Marca de tiempo del último datagrama (hilo TestLink); stale la lee sin main.
+    private var lastPacketAtProbe = Date.distantPast
 
     public init() {}
 
     public func start() {
-        stopped = false
+        let launch: Bool = queue.sync {
+            if started { return false }
+            started = true
+            stopped = false
+            return true
+        }
+        guard launch else { return }
         queue.async { [weak self] in self?.run() }
         queue.async { [weak self] in self?.runStale() }
     }
 
     public func stop() {
-        stopped = true
+        queue.sync {
+            stopped = true
+            started = false
+        }
         sock?.close()
         DispatchQueue.main.async {
-            self.snapshot = nil
+            self.playback.clear()
             self.roster = TestLinkRoster()
             self.lastRosterKey = ""
             self.rosterTick &+= 1
@@ -615,13 +679,14 @@ public final class TestLinkReceiver: ObservableObject {
                         lastBPMTitle[i] = ""
                     }
                 }
-                lastPacketAt = Date()
+                let packetAt = Date()
+                lastPacketAtProbe = packetAt
                 let rosterKey = "\(frame.denonOn)|\(frame.pioneerOn)|" + frame.decks.map {
                     "\($0.loaded ? 1 : 0):\($0.title)"
                 }.joined(separator: ",")
                 let loadedLayers = frame.decks.map(\.loaded)
                 DispatchQueue.main.async {
-                    self.snapshot = frame
+                    self.playback.ingest(frame, at: packetAt)
                     if rosterKey != self.lastRosterKey {
                         self.lastRosterKey = rosterKey
                         self.roster = TestLinkRoster(
@@ -635,17 +700,18 @@ public final class TestLinkReceiver: ObservableObject {
             }
             socket.close()
         } catch {
-            // Puerto ocupado: la app sigue; TEST no superpondrá.
+            // Puerto ocupado: permitir otro start() (p. ej. tras soltar :51341).
+            started = false
         }
     }
 
     private func runStale() {
         while !stopped {
             Thread.sleep(forTimeInterval: 0.4)
-            if Date().timeIntervalSince(lastPacketAt) > 2.0 {
+            if Date().timeIntervalSince(lastPacketAtProbe) > 2.0 {
                 DispatchQueue.main.async {
-                    if self.snapshot != nil {
-                        self.snapshot = nil
+                    if self.playback.latest != nil {
+                        self.playback.clear()
                         self.roster = TestLinkRoster()
                         self.lastRosterKey = ""
                         self.rosterTick &+= 1

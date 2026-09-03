@@ -56,6 +56,29 @@ public enum NetworkInfo {
         lanAddress(reaching: nil)
     }
 
+    /// Todas las `en*` con IPv4 (Ethernet + Wi‑Fi). El HOWDY debe salir por
+    /// cada una: si solo se anuncia en en0 Ethernet, un SC6000 solo en Wi‑Fi
+    /// no ve al cliente y no aparece.
+    public static func allLANAddresses() -> [LANAddress] {
+        collectLANIfaces().map { LANAddress(ip: $0.ip, interface: $0.name) }
+    }
+
+    /// Broadcast dirigido de la subred (p. ej. 192.168.1.255). Complementa
+    /// 255.255.255.255 cuando el AP/Wi‑Fi filtra limited broadcast.
+    public static func subnetBroadcast(for lan: LANAddress) -> String? {
+        guard let iface = collectLANIfaces().first(where: {
+            $0.ip == lan.ip && (lan.interface.isEmpty || $0.name == lan.interface)
+        }) else { return nil }
+        guard iface.ip.count == 4, iface.netmask.count == 4 else { return nil }
+        var b = [UInt8](repeating: 0, count: 4)
+        for i in 0..<4 {
+            b[i] = iface.ip[i] | ~iface.netmask[i]
+        }
+        if b == [255, 255, 255, 255] { return nil }
+        if b == iface.ip { return nil }
+        return describe(b)
+    }
+
     public static func lanAddress(reaching peerIP: String?) -> LANAddress {
         let ifaces = collectLANIfaces()
         if let peerIP, let peer = ipv4Bytes(from: peerIP) {
@@ -136,17 +159,27 @@ public enum NetworkInfo {
         return false
     }
 
-    /// Candidatas para anunciar hacia CDJ/SC6000: solo `en*` vivas, sin
-    /// link-local. Ethernet por delante de Wi‑Fi.
+    /// Candidatas para anunciar hacia CDJ/SC6000: `en*` vivas.
+    /// Incluye 169.254 (cable directo sin DHCP / APIPA). Ethernet > Wi‑Fi > link-local.
     private static func collectLANIfaces() -> [IPv4Iface] {
         collectIPv4Ifaces(includeLoopback: false).compactMap { iface -> IPv4Iface? in
             if isRejectedName(iface.name) { return nil }
             if !iface.name.hasPrefix("en") { return nil }
-            if isLinkLocal(iface.ip) { return nil }
-            let kind = mediaKind(for: iface.name)
+            let kind: Kind
+            if isLinkLocal(iface.ip) {
+                kind = .otherEN
+            } else {
+                kind = mediaKind(for: iface.name)
+            }
             return IPv4Iface(name: iface.name, ip: iface.ip, netmask: iface.netmask, kind: kind)
         }
-        .sorted { $0.kind.rawValue < $1.kind.rawValue }
+        .sorted { lhs, rhs in
+            // Preferir no-link-local; luego ethernet > wifi > other.
+            let llL = isLinkLocal(lhs.ip)
+            let llR = isLinkLocal(rhs.ip)
+            if llL != llR { return !llL }
+            return lhs.kind.rawValue < rhs.kind.rawValue
+        }
     }
 
     private static func mediaKind(for name: String) -> Kind {

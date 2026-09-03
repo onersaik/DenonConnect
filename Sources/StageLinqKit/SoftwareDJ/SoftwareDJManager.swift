@@ -7,6 +7,9 @@ import Foundation
 import Combine
 import Network
 import CommonCrypto
+#if canImport(AppKit)
+import AppKit
+#endif
 #if canImport(Darwin)
 import Darwin
 #endif
@@ -47,10 +50,15 @@ public final class SoftwareDJManager: ObservableObject {
     @Published public private(set) var decks: [SoftwareDeck] = []
     @Published public var seratoStatus: String = "sin Serato"
     @Published public var vdjStatus: String = "sin VirtualDJ"
+    @Published public var rekordboxStatus: String = "sin rekordbox"
+    @Published public var traktorStatus: String = "sin Traktor"
+    @Published public private(set) var rekordboxAppRunning = false
+    @Published public private(set) var traktorAppRunning = false
     @Published public var rosterTick: UInt64 = 0
 
     private let vdj = VirtualDJPoller()
     private let serato = SeratoRemoteServer()
+    private var presenceTimer: DispatchSourceTimer?
     private var started = false
 
     public init() {}
@@ -66,12 +74,15 @@ public final class SoftwareDJManager: ObservableObject {
         }
         vdj.start()
         serato.start()
+        startPresenceScan()
     }
 
     public func stop() {
         started = false
         vdj.stop()
         serato.stop()
+        presenceTimer?.cancel()
+        presenceTimer = nil
     }
 
     public var liveDecks: [SoftwareDeck] {
@@ -80,6 +91,43 @@ public final class SoftwareDJManager: ObservableObject {
 
     public var seratoLiveCount: Int { liveDecks.filter { $0.kind == .serato }.count }
     public var vdjLiveCount: Int { liveDecks.filter { $0.kind == .virtualdj }.count }
+
+    /// Apps locales (sin fingir decks). rekordbox en LAN va por Pro DJ Link.
+    private func startPresenceScan() {
+        let t = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
+        t.schedule(deadline: .now() + 0.6, repeating: 2.0)
+        t.setEventHandler { [weak self] in self?.scanLocalDJApps() }
+        t.resume()
+        presenceTimer = t
+        scanLocalDJApps()
+    }
+
+    private func scanLocalDJApps() {
+        #if canImport(AppKit)
+        let apps = NSWorkspace.shared.runningApplications
+        var rb = false
+        var tr = false
+        for app in apps {
+            let bundle = (app.bundleIdentifier ?? "").lowercased()
+            let name = (app.localizedName ?? "").lowercased()
+            if bundle.contains("rekordbox") || name.contains("rekordbox") { rb = true }
+            if bundle.contains("traktor") || name.contains("traktor") { tr = true }
+        }
+        DispatchQueue.main.async {
+            let rbChanged = self.rekordboxAppRunning != rb
+            let trChanged = self.traktorAppRunning != tr
+            self.rekordboxAppRunning = rb
+            self.traktorAppRunning = tr
+            self.rekordboxStatus = rb
+                ? "rekordbox en este Mac — exporta a Pro DJ Link para ver pistas"
+                : "sin rekordbox (abre rekordbox o export en LAN)"
+            self.traktorStatus = tr
+                ? "Traktor en este Mac — sin protocolo de pista (no se inventan decks)"
+                : "sin Traktor (abre Traktor en este Mac)"
+            if rbChanged || trChanged { self.rosterTick &+= 1 }
+        }
+        #endif
+    }
 
     private func merge(kind: SoftwareDJKind, incoming: [SoftwareDeckSnapshot], status: String) {
         DispatchQueue.main.async {

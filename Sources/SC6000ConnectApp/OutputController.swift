@@ -39,6 +39,31 @@ struct LTCDeckSlot: Identifiable, Equatable {
     let label: String
 }
 
+/// Si cae Ethernet/Wi‑Fi mientras el LTC está ON.
+enum LTCNetworkLossMode: String, CaseIterable, Identifiable {
+    case followNetwork
+    case freeze
+    case continueManual
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .followNetwork: return "Seguir red"
+        case .freeze: return "Congelar"
+        case .continueManual: return "Continuar manual"
+        }
+    }
+
+    var help: String {
+        switch self {
+        case .followNetwork: return "Sin red: el TC se para (sigue la disponibilidad de LAN)."
+        case .freeze: return "Sin red: congela el último frame (silencio, no avanza)."
+        case .continueManual: return "Sin red: el TC sigue avanzando solo; no se corta."
+        }
+    }
+}
+
 // MARK: - OutputController
 
 final class OutputController: ObservableObject {
@@ -79,6 +104,18 @@ final class OutputController: ObservableObject {
     /// LOCK por fila: el Master auto-follow / fader / On Air no pisan este deck.
     /// Con LTC propio en otra salida, su generador sigue el playhead de esta fila.
     @Published var ltcDeckLocked: [String: Bool] = [:]
+    /// Caída de red con LTC ON: Seguir red / Congelar / Continuar manual.
+    @Published var ltcNetworkLossMode: LTCNetworkLossMode = {
+        if let raw = UserDefaults.standard.string(forKey: "sc.ltcNetworkLossMode"),
+           let mode = LTCNetworkLossMode(rawValue: raw) {
+            return mode
+        }
+        return .continueManual
+    }() {
+        didSet { UserDefaults.standard.set(ltcNetworkLossMode.rawValue, forKey: "sc.ltcNetworkLossMode") }
+    }
+    /// true mientras NWPathMonitor reporta LAN caída.
+    private var networkLost = false
     /// Filas que Dual/Auto/Pioneer están pintando. El MASTER auto-follow no
     /// sigue un CDJ 5.º oculto ni un TEST que la vista no muestra.
     private var visibleDeckIDs: [String] = []
@@ -129,6 +166,8 @@ final class OutputController: ObservableObject {
     private var mtc:     MIDITimecodeGenerator?
     private var web:     WebServer?
     private var timer:   Timer?
+    private var lastPublicMonitorPush = Date.distantPast
+    private let publicMonitorMinInterval: TimeInterval = 0.12 // ≤ ~8 Hz hacia :3000
 
     private weak var stageLinq:  StageLinqManager?
     private weak var proDJLink:  ProDJLinkManager?
@@ -570,6 +609,9 @@ final class OutputController: ObservableObject {
             let srv = WebServer(log: { [weak self] in self?.logSink?($0) })
             srv.port = port
             srv.stateProvider = { [weak self] in self?.currentDeckSnapshots() ?? [] }
+            srv.tracklistProvider = { [weak self] in
+                self?.tracklist?.cachedBridgePayload ?? [:]
+            }
             srv.failureHandler = { [weak self] msg in
                 DispatchQueue.main.async {
                     self?.web?.stop()
@@ -614,8 +656,34 @@ final class OutputController: ObservableObject {
         #endif
     }
 
-    func copyTimecode() {
-        copyToPasteboard(ltcTimecode, hint: "TC copiado")
+    func copyTimecode(_ text: String? = nil) {
+        copyToPasteboard(text ?? displayTimecode(deckID: ltcFollowedDeckID ?? hotDeckID, elapsed: nil), hint: "TC copiado")
+    }
+
+    /// TC en pantalla = playhead. MASTER si está ON; si no, LTC de esa fila; si no, segundos del deck.
+    func displayTimecode(deckID: String?, elapsed: Double?) -> String {
+        let head = elapsed ?? 0
+        if ltcEnabled {
+            let tc = ltcTimecode
+            if !tc.isEmpty, !(tc == "00:00:00:00" && head > 0.04) {
+                return tc
+            }
+        }
+        if let deckID {
+            if let pair = ltcDeckTimecode.first(where: { Self.sameDeckID($0.key, deckID) }) {
+                let rowFPS = (ltcDeckFrameRates[pair.key] ?? ltcFrameRate).rawValue
+                if !pair.value.isEmpty, !(pair.value == "00:00:00:00" && head > 0.04) {
+                    return pair.value
+                }
+                if elapsed != nil, head >= 0 {
+                    return LTCGenerator.timecodeText(seconds: head, fps: rowFPS)
+                }
+            }
+        }
+        if elapsed != nil, head >= 0 {
+            return LTCGenerator.timecodeText(seconds: head, fps: ltcFrameRate.rawValue)
+        }
+        return "00:00:00:00"
     }
 
     private static func webErrorText(_ error: Error, port: UInt16) -> String {
@@ -696,7 +764,7 @@ final class OutputController: ObservableObject {
         if ltcEnabled {
             let snap = snapshotForMaster()
             if clockSource != snap.sourceLabel { clockSource = snap.sourceLabel }
-            if abs(clockBPM - snap.bpm) > 0.01 { clockBPM = snap.bpm }
+            if abs(clockBPM - snap.bpm) > 0.05 { clockBPM = snap.bpm }
             applyToMaster(snap)
             if ltcFollowedDeckID != snap.sourceDeckID {
                 ltcFollowedDeckID = snap.sourceDeckID
@@ -705,11 +773,15 @@ final class OutputController: ObservableObject {
             if ltcTimecode != tc { ltcTimecode = tc }
         } else {
             if ltcFollowedDeckID != nil { ltcFollowedDeckID = nil }
-            if clockSource != masterSnapshot.sourceLabel {
-                clockSource = masterSnapshot.sourceLabel
-            }
-            if abs(clockBPM - masterSnapshot.bpm) > 0.01 {
-                clockBPM = masterSnapshot.bpm
+            // Sin LTC/MTC no empujar clock* a SwiftUI: ContentView observa
+            // OutputController y un BPM que tiembla a 60 Hz tumba toda la UI.
+            if mtcEnabled {
+                if clockSource != masterSnapshot.sourceLabel {
+                    clockSource = masterSnapshot.sourceLabel
+                }
+                if abs(clockBPM - masterSnapshot.bpm) > 0.05 {
+                    clockBPM = masterSnapshot.bpm
+                }
             }
         }
 
@@ -730,18 +802,81 @@ final class OutputController: ObservableObject {
 
         trackHistoryIfNeeded()
         ingestTracklist()
+        pushPublicMonitorBridge()
     }
 
     func liveDeckSnapshots() -> [DeckSnapshot] { currentDeckSnapshots() }
 
+    /// Bridge hacia Express :3000 (monitor público). Sin secretos; solo estado de cabina.
+    private func pushPublicMonitorBridge() {
+        let now = Date()
+        guard now.timeIntervalSince(lastPublicMonitorPush) >= publicMonitorMinInterval else { return }
+        lastPublicMonitorPush = now
+        let snaps = currentDeckSnapshots()
+        let tc = snaps.first(where: { $0.ltcSource })?.tcTimecode
+            ?? snaps.first(where: { $0.isMaster })?.tcTimecode
+            ?? snaps.first(where: { $0.isPlaying })?.tcTimecode
+            ?? snaps.compactMap(\.tcTimecode).first
+            ?? ltcTimecode
+        var payload: [String: Any] = [
+            "tc": tc.isEmpty ? "00:00:00:00" : tc,
+            "updatedAt": ISO8601DateFormatter().string(from: now),
+            "decks": snaps.map { s -> [String: Any] in
+                var d: [String: Any] = [
+                    "tag": s.tag,
+                    "label": s.label,
+                    "title": s.title,
+                    "artist": s.artist,
+                    "key": s.key,
+                    "bpm": s.bpm,
+                    "isPlaying": s.isPlaying,
+                    "isMaster": s.isMaster,
+                    "isOnAir": s.isOnAir,
+                    "ltcSource": s.ltcSource,
+                    "beatInBar": s.beatInBar,
+                ]
+                if let v = s.elapsed { d["elapsed"] = v; d["playhead"] = v }
+                if let v = s.duration { d["duration"] = v }
+                if let v = s.progress { d["progress"] = v }
+                if let v = s.pitchPct { d["pitchPct"] = v }
+                if let v = s.tcTimecode { d["tcTimecode"] = v }
+                if let p = s.peaks, !p.isEmpty { d["peaks"] = p }
+                if let p = s.peaksLow, !p.isEmpty { d["peaksLow"] = p }
+                if let p = s.peaksMid, !p.isEmpty { d["peaksMid"] = p }
+                if let p = s.peaksHigh, !p.isEmpty { d["peaksHigh"] = p }
+                return d
+            }
+        ]
+        if let tl = tracklist, !tl.cachedBridgePayload.isEmpty {
+            payload["tracklist"] = tl.cachedBridgePayload
+        }
+        guard let body = try? JSONSerialization.data(withJSONObject: payload) else { return }
+        var req = URLRequest(url: URL(string: "http://127.0.0.1:3000/api/monitor/ingest")!)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("stageconnect-mac", forHTTPHeaderField: "X-StageConnect-Bridge")
+        req.httpBody = body
+        req.timeoutInterval = 0.8
+        URLSession.shared.dataTask(with: req).resume()
+    }
+
     private func ingestTracklist() {
-        let playing = currentDeckSnapshots().compactMap { d -> (String, String, String, Bool)? in
+        let snaps = currentDeckSnapshots()
+        let playing = snaps.compactMap { d -> (String, String, String, Bool)? in
             guard d.isPlaying, !d.title.isEmpty else { return nil }
             return (d.title, d.artist, d.label, d.isMaster || d.ltcSource)
         }
+        let master = snaps.first(where: { $0.ltcSource })
+            ?? snaps.first(where: { $0.isMaster })
+            ?? snaps.first(where: { $0.isPlaying })
+        let seconds = master?.playhead ?? master?.elapsed ?? 0
+        let smpte = master?.tcTimecode ?? ltcTimecode
+        let fps = ltcFrameRate.rawValue
         let store = tracklist
         DispatchQueue.main.async {
-            guard let store, !store.items.isEmpty else { return }
+            guard let store else { return }
+            store.syncToPlayhead(seconds: seconds, smpte: smpte, fps: fps)
+            guard !store.items.isEmpty else { return }
             store.ingest(playing: playing)
         }
     }
@@ -755,11 +890,23 @@ final class OutputController: ObservableObject {
     /// Un fan-out (MASTER o una fila). Nunca escribe en el otro.
     private func applyPlayhead(_ fan: LTCFanout?, _ snap: SyncSnapshot?) {
         guard let fan else { return }
+        if networkLost {
+            switch ltcNetworkLossMode {
+            case .continueManual:
+                // El AU sigue el reloj de audio; no pausar ni clavar.
+                return
+            case .freeze, .followNetwork:
+                fan.setPaused(true)
+                return
+            }
+        }
         guard let snap else {
+            if ltcNetworkLossMode == .continueManual { return }
             fan.setPaused(true)
             return
         }
         guard let playhead = snap.playhead, playhead.isFinite, playhead >= 0 else {
+            if ltcNetworkLossMode == .continueManual { return }
             fan.setPaused(true)
             return
         }
@@ -767,15 +914,51 @@ final class OutputController: ObservableObject {
     }
 
     private func applyPlayhead(mtc gen: MIDITimecodeGenerator, _ snap: SyncSnapshot?) {
+        if networkLost {
+            switch ltcNetworkLossMode {
+            case .continueManual:
+                return
+            case .freeze, .followNetwork:
+                gen.setPaused(true)
+                return
+            }
+        }
         guard let snap else {
+            if ltcNetworkLossMode == .continueManual { return }
             gen.setPaused(true)
             return
         }
         guard let playhead = snap.playhead, playhead.isFinite, playhead >= 0 else {
+            if ltcNetworkLossMode == .continueManual { return }
             gen.setPaused(true)
             return
         }
         gen.applyPlayhead(seconds: playhead, playing: snap.isPlaying)
+    }
+
+    /// Cable/Wi‑Fi caído: aplica la política de emergencia LTC.
+    func noteNetworkLost() {
+        networkLost = true
+        switch ltcNetworkLossMode {
+        case .continueManual:
+            logSink?("[LTC] Red caída — Continuar manual (TC no se corta)")
+        case .freeze:
+            ltc?.setPaused(true)
+            for (_, fan) in deckLTC { fan.setPaused(true) }
+            mtc?.setPaused(true)
+            logSink?("[LTC] Red caída — Congelar último frame")
+        case .followNetwork:
+            ltc?.setPaused(true)
+            for (_, fan) in deckLTC { fan.setPaused(true) }
+            mtc?.setPaused(true)
+            logSink?("[LTC] Red caída — Seguir red (TC parado)")
+        }
+    }
+
+    /// LAN de vuelta: el tick vuelve a clavar el playhead de red.
+    func noteNetworkRestored() {
+        networkLost = false
+        logSink?("[LTC] Red recuperada — TC sigue playhead de cabina")
     }
 
     private static func timecode(_ snap: SyncSnapshot?, fps: LTCGenerator.FrameRate) -> String {
@@ -856,7 +1039,7 @@ final class OutputController: ObservableObject {
             for device in sl.devices {
                 for deck in device.decks {
                     let overlay = denonOverlay(for: device, deck: deck)
-                    let loaded = overlay?.loaded ?? deck.songLoaded
+                    let loaded = overlay?.loaded ?? (deck.songLoaded || !deck.trackTitle.isEmpty)
                     guard loaded else { continue }
                     let id = device.isDenonSimulator
                         ? DeckDisplayBuilder.testDenonID(deck.id - 1)
@@ -882,6 +1065,18 @@ final class OutputController: ObservableObject {
             for device in pdl.devices {
                 if !shouldUsePioneer(device) { continue }
                     add("pioneer-\(device.id)", DeckDisplayBuilder.productPioneerLabel(player: Int(device.playerNumber), model: device.model))
+            }
+        }
+        if let soft = software {
+            for deck in soft.liveDecks {
+                add(deck.id, deck.shortName)
+            }
+        }
+        // Dual: solo las filas que la vista pinta (tope 4 CDJ). Un 5.º en LAN
+        // no entra en CONFIG/LOCK/MASTER.
+        if !visibleDeckIDs.isEmpty {
+            slots = slots.filter { slot in
+                visibleDeckIDs.contains { Self.sameDeckID($0, slot.id) }
             }
         }
         return slots
@@ -922,12 +1117,13 @@ final class OutputController: ObservableObject {
             for device in sl.devices {
                 for deck in device.decks {
                     let overlay = denonOverlay(for: device, deck: deck)
-                    guard overlay?.loaded ?? deck.songLoaded else { continue }
+                    guard overlay?.loaded ?? (deck.songLoaded || !deck.trackTitle.isEmpty) else { continue }
                     let bpm = MusicalClock.bpm(overlay?.bpm ?? 0, deck.bpm, deck.beatBpm)
                     let layer = DeckDisplayBuilder.denonLayerCaption(deck.id)
                     let denonLabel = DeckDisplayBuilder.productDenonLabel(layer: deck.id)
                     let prog  = overlay?.progress ?? deck.beatProgress
-                    let elapsed: Double? = overlay?.position ?? prog.map { $0 * deck.trackLength }
+                    let elapsed: Double? = overlay?.position ?? deck.resolvedElapsed
+                        ?? prog.flatMap { p in deck.trackLength > 0 ? p * deck.trackLength : nil }
                     let deckID = device.isDenonSimulator
                         ? DeckDisplayBuilder.testDenonID(deck.id - 1)
                         : "denon-\(device.id)-\(deck.id)"
@@ -952,9 +1148,15 @@ final class OutputController: ObservableObject {
                             ? MusicalClock.beatInBar(position: overlay?.position ?? 0, bpm: bpm)
                             : Int(deck.currentBeat.truncatingRemainder(dividingBy: 4)) + 1,
                         key:       deck.trackKey,
+                        pitchPct:  DeckDisplayBuilder.publishedPitch(overlay?.pitch)
+                            ?? DeckDisplayBuilder.publishedPitch((deck.speed - 1.0) * 100.0),
                         ltcSource: isLTCSrc,
                         tcTimecode: ltcDeckTimecode[deckID] ?? (isLTCSrc && ltcEnabled ? ltcTimecode : nil),
-                        tag:       dTag
+                        tag:       dTag,
+                        peaks:     (overlay?.peaks ?? deck.peaks).isEmpty ? nil : (overlay?.peaks ?? deck.peaks),
+                        peaksLow:  (overlay?.peaksLow ?? deck.peaksLow).isEmpty ? nil : (overlay?.peaksLow ?? deck.peaksLow),
+                        peaksMid:  (overlay?.peaksMid ?? deck.peaksMid).isEmpty ? nil : (overlay?.peaksMid ?? deck.peaksMid),
+                        peaksHigh: (overlay?.peaksHigh ?? deck.peaksHigh).isEmpty ? nil : (overlay?.peaksHigh ?? deck.peaksHigh)
                     ))
                 }
             }
@@ -973,7 +1175,11 @@ final class OutputController: ObservableObject {
                 elapsed:   snap.playhead,
                 duration:  overlay.duration > 0 ? overlay.duration : nil,
                 progress:  overlay.progress,
-                beatInBar: snap.beatInBar
+                beatInBar: snap.beatInBar,
+                peaks:     overlay.peaks.isEmpty ? nil : overlay.peaks,
+                peaksLow:  overlay.peaksLow.isEmpty ? nil : overlay.peaksLow,
+                peaksMid:  overlay.peaksMid.isEmpty ? nil : overlay.peaksMid,
+                peaksHigh: overlay.peaksHigh.isEmpty ? nil : overlay.peaksHigh
             ))
         }
         if let layers = testLink?.roster.loadedLayers {
@@ -1009,7 +1215,11 @@ final class OutputController: ObservableObject {
                     isOnAir:   device.isOnAir,
                     ltcSource: pIsLTCSrc,
                     tcTimecode: ltcDeckTimecode[pID] ?? (pIsLTCSrc && ltcEnabled ? ltcTimecode : nil),
-                    tag:       pTag
+                    tag:       pTag,
+                    peaks:     device.peaks.isEmpty ? nil : device.peaks,
+                    peaksLow:  device.peaksLow.isEmpty ? nil : device.peaksLow,
+                    peaksMid:  device.peaksMid.isEmpty ? nil : device.peaksMid,
+                    peaksHigh: device.peaksHigh.isEmpty ? nil : device.peaksHigh
                 ))
             }
         }
@@ -1053,7 +1263,11 @@ final class OutputController: ObservableObject {
             elapsed:   overlay.position,
             duration:  overlay.duration > 0 ? overlay.duration : nil,
             progress:  overlay.progress,
-            beatInBar: MusicalClock.beatInBar(position: overlay.position, bpm: bpm)
+            beatInBar: MusicalClock.beatInBar(position: overlay.position, bpm: bpm),
+            peaks:     overlay.peaks.isEmpty ? nil : overlay.peaks,
+            peaksLow:  overlay.peaksLow.isEmpty ? nil : overlay.peaksLow,
+            peaksMid:  overlay.peaksMid.isEmpty ? nil : overlay.peaksMid,
+            peaksHigh: overlay.peaksHigh.isEmpty ? nil : overlay.peaksHigh
         )
     }
 
@@ -1100,7 +1314,30 @@ final class OutputController: ObservableObject {
                 }
             }
         }
+        if let soft = software {
+            for deck in soft.liveDecks where deck.id == id || Self.sameDeckID(deck.id, id) {
+                return makeSoftwareSnapshot(deck)
+            }
+        }
         return nil
+    }
+
+    private func makeSoftwareSnapshot(_ deck: SoftwareDeck) -> SyncSnapshot {
+        let title = TrackNaming.cleanTitle(deck.title)
+        let bpm = MusicalClock.bpm(deck.bpm)
+        return SyncSnapshot(
+            bpm: bpm,
+            beatInBar: MusicalClock.beatInBar(position: deck.position, bpm: bpm),
+            beatCount: MusicalClock.beatCount(position: deck.position, bpm: bpm),
+            playhead: deck.position,
+            isPlaying: deck.playing,
+            sourceLabel: deck.shortName,
+            trackTitle: title.isEmpty ? nil : title,
+            trackArtist: deck.artist.isEmpty ? nil : deck.artist,
+            sourceDeckID: deck.id,
+            isMaster: false,
+            isOnAir: false
+        )
     }
 
     private func makeTestLinkSyncSnapshot(_ overlay: TestLinkDeck, label: String,
@@ -1127,6 +1364,7 @@ final class OutputController: ObservableObject {
         let bpm = MusicalClock.bpm(overlay?.bpm ?? 0, deck.bpm, deck.beatBpm)
         let playhead: Double? = {
             if let o = overlay { return o.position }
+            if let e = deck.resolvedElapsed { return e }
             if deck.trackLength > 0, let p = deck.beatProgress { return p * deck.trackLength }
             if deck.currentBeat > 0, bpm > 0 { return deck.currentBeat * 60.0 / bpm }
             return nil
@@ -1199,23 +1437,37 @@ final class OutputController: ObservableObject {
     }
 
     private func currentSnapshot() -> SyncSnapshot {
-        var masterPlaying: SyncSnapshot?
-        var onAirPlaying: SyncSnapshot?
-        var anyPlaying: SyncSnapshot?
-        var anyMaster: SyncSnapshot?
-        var anyLoaded: SyncSnapshot?
+        struct Pick {
+            var masterPlaying: SyncSnapshot?
+            var onAirPlaying: SyncSnapshot?
+            var anyPlaying: SyncSnapshot?
+            var anyMaster: SyncSnapshot?
+            var anyLoaded: SyncSnapshot?
+            var best: SyncSnapshot? {
+                masterPlaying ?? onAirPlaying ?? anyPlaying ?? anyMaster ?? anyLoaded
+            }
+            mutating func add(_ snap: SyncSnapshot) {
+                if snap.playhead != nil && anyLoaded == nil { anyLoaded = snap }
+                if snap.isPlaying && anyPlaying == nil { anyPlaying = snap }
+                if snap.isOnAir && snap.isPlaying && onAirPlaying == nil { onAirPlaying = snap }
+                if snap.isMaster {
+                    if anyMaster == nil { anyMaster = snap }
+                    if snap.isPlaying && masterPlaying == nil { masterPlaying = snap }
+                }
+            }
+        }
+        var hardware = Pick()
+        var test = Pick()
 
         func consider(_ snap: SyncSnapshot) {
             // Dual/filtro de vista: no seguir un CDJ oculto ni TEST que no se pinta.
             if !isVisibleSource(snap.sourceDeckID) { return }
             // Auto-follow no roba un deck LOCK: esa fila tiene (o puede tener) LTC propio.
             if let sid = snap.sourceDeckID, isDeckLocked(sid) { return }
-            if snap.playhead != nil && anyLoaded == nil { anyLoaded = snap }
-            if snap.isPlaying && anyPlaying == nil { anyPlaying = snap }
-            if snap.isOnAir && snap.isPlaying && onAirPlaying == nil { onAirPlaying = snap }
-            if snap.isMaster {
-                if anyMaster == nil { anyMaster = snap }
-                if snap.isPlaying && masterPlaying == nil { masterPlaying = snap }
+            if Self.isTestSourceID(snap.sourceDeckID) {
+                test.add(snap)
+            } else {
+                hardware.add(snap)
             }
         }
 
@@ -1223,7 +1475,7 @@ final class OutputController: ObservableObject {
             for device in sl.devices {
                 for deck in device.decks {
                     let overlay = denonOverlay(for: device, deck: deck)
-                    guard overlay?.loaded ?? deck.songLoaded else { continue }
+                    guard overlay?.loaded ?? (deck.songLoaded || !deck.trackTitle.isEmpty) else { continue }
                     consider(makeDenonSnapshot(deck: deck, device: device, overlay: overlay))
                 }
             }
@@ -1251,7 +1503,14 @@ final class OutputController: ObservableObject {
                                               isMaster: overlay.isMaster || overlay.playing))
         }
 
-        return masterPlaying ?? onAirPlaying ?? anyPlaying ?? anyMaster ?? anyLoaded ?? SyncSnapshot.idle
+        if let soft = software {
+            for deck in soft.liveDecks {
+                consider(makeSoftwareSnapshot(deck))
+            }
+        }
+
+        // Hardware de LAN gana siempre. TEST/SIM solo si no hay reproductor real visible.
+        return hardware.best ?? test.best ?? SyncSnapshot.idle
     }
 
     private func pioneerTestOverlay() -> TestLinkDeck? {
@@ -1272,6 +1531,14 @@ final class OutputController: ObservableObject {
     private func denonOverlay(for device: StageLinqDevice, deck: DeckState) -> TestLinkDeck? {
         guard testLink?.roster.denonOn == true, device.isDenonSimulator else { return nil }
         return testLink?.snapshot?.deck(deck.id - 1)
+    }
+
+    /// Filas TEST/SIM. Un SC6000/CDJ de LAN nunca entra aquí.
+    private static func isTestSourceID(_ id: String?) -> Bool {
+        guard let id, !id.isEmpty else { return false }
+        if id == DeckDisplayBuilder.testPioneerID { return true }
+        if id.hasPrefix("denon-test-") { return true }
+        return looksLikeDenonSimulatorID(id)
     }
 
     /// `denon-test-0` ≡ SIM `denon-<localhost/SIM>-1`. Un SC6000 real no es esa capa:

@@ -9,6 +9,7 @@ enum MonitorLayout: String, CaseIterable, Identifiable {
     case datos = "Solo datos"
     case cdj = "CDJ"
     case overview = "Overview"
+    case tracklist = "Tracklist"
 
     var id: String { rawValue }
 
@@ -18,17 +19,19 @@ enum MonitorLayout: String, CaseIterable, Identifiable {
         case .datos: return "MASTER + TC + decks. Sin chrome en pantalla completa."
         case .cdj: return "Aguja al centro, zoom de pista, MASTER grande."
         case .overview: return "Pista entera por fila. Contexto de todo el set."
+        case .tracklist: return "Setlist enlazado al TC: pista activa y anotaciones FX al avanzar el playhead."
         }
     }
 
     var isPresentation: Bool {
-        self == .soloTC || self == .datos
+        self == .soloTC || self == .datos || self == .tracklist
     }
 
     static func resolved(_ raw: String) -> MonitorLayout {
         if let match = MonitorLayout(rawValue: raw) { return match }
         if raw == "TC" || raw == "Master" { return .soloTC }
         if raw == "Todos" || raw == "TC + decks" || raw == "Mini" { return .datos }
+        if raw == "Setlist" { return .tracklist }
         return .datos
     }
 }
@@ -96,25 +99,25 @@ struct MonitorPalette {
         controlOnText: Color.black
     )
 
-    /// Ensayo de día: fondo claro, texto oscuro, LED naranja/verde legibles.
+    /// Ensayo de día: misma base que Theme.claro (cabecera/botones coherentes).
     static let day = MonitorPalette(
-        background: Color(red: 0.93, green: 0.92, blue: 0.88),
-        panel: Color(red: 0.97, green: 0.96, blue: 0.93),
-        strip: Color(red: 0.90, green: 0.89, blue: 0.84),
-        deckFill: Color(red: 0.88, green: 0.87, blue: 0.82),
-        text: Color(red: 0.10, green: 0.10, blue: 0.11),
-        textSecondary: Color(red: 0.28, green: 0.27, blue: 0.24),
-        textTertiary: Color(red: 0.46, green: 0.44, blue: 0.40),
+        background: Color(red: 0.94, green: 0.94, blue: 0.95),
+        panel: Color(red: 0.90, green: 0.90, blue: 0.92),
+        strip: Color(red: 0.96, green: 0.96, blue: 0.97),
+        deckFill: Color(red: 1.00, green: 1.00, blue: 1.00),
+        text: Color(red: 0.08, green: 0.08, blue: 0.10),
+        textSecondary: Color.black.opacity(0.62),
+        textTertiary: Color.black.opacity(0.38),
         ledGreen: Color(red: 0.06, green: 0.48, blue: 0.20),
-        ledOrange: Color(red: 0.82, green: 0.36, blue: 0.04),
-        ledYellow: Color(red: 0.72, green: 0.46, blue: 0.02),
+        ledOrange: Theme.accent,
+        ledYellow: Theme.yellow,
         ledDim: Color(red: 0.06, green: 0.48, blue: 0.20).opacity(0.28),
         divider: Color.black.opacity(0.12),
-        waveformBG: Color(red: 0.98, green: 0.97, blue: 0.94),
+        waveformBG: Color(red: 0.98, green: 0.98, blue: 0.99),
         playhead: Color(red: 0.08, green: 0.08, blue: 0.09),
         controlFill: Color.black.opacity(0.07),
-        controlOn: Color(red: 0.82, green: 0.36, blue: 0.04),
-        controlOnText: Color.white
+        controlOn: Theme.accent,
+        controlOnText: Color.black
     )
 
     static func resolve(day: Bool) -> MonitorPalette { day ? .day : .night }

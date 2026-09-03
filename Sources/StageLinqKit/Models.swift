@@ -48,29 +48,57 @@ public final class DeckState: ObservableObject, Identifiable {
     }
 
     // Beat en vivo (servicio BeatInfo)
+    /// Crudo a frecuencia de paquete; LTC / playhead leen esto sin SwiftUI.
+    public var liveBeat: Double = 0
+    /// Marca del último BeatInfo. Interpolación 30 fps entre paquetes.
+    public var beatReceivedAt: Date = .distantPast
     @Published public var currentBeat: Double = 0
     @Published public var totalBeats: Double = 0
     @Published public var beatBpm: Double = 0
     @Published public var beatPulse: Bool = false // parpadeo visual en cada beat
+    var lastBeatUIPublish: Date = .distantPast
+
+    /// Ruta Engine Library (`TrackNetworkPath`) para FileTransfer/waveform.
+    public var trackNetworkPath: String = ""
+    /// Peaks overview (FileTransfer / procedural). Vacío = waveform procedural en UI.
+    @Published public var peaks: [UInt8] = []
+    @Published public var peaksLow: [UInt8] = []
+    @Published public var peaksMid: [UInt8] = []
+    @Published public var peaksHigh: [UInt8] = []
 
     public init(id: Int) { self.id = id }
 
     /// Fracción de progreso 0...1 derivada del beat, cuando hay datos de BeatInfo.
     public var beatProgress: Double? {
         guard totalBeats > 0 else { return nil }
-        return min(max(currentBeat / totalBeats, 0), 1)
+        let beat = liveBeat > 0 ? liveBeat : currentBeat
+        return min(max(beat / totalBeats, 0), 1)
+    }
+
+    /// Segundos de playhead si hay BeatInfo + duración (o totalBeats/BPM).
+    public var resolvedElapsed: Double? {
+        if let p = beatProgress, trackLength > 0 {
+            return min(max(p * trackLength, 0), trackLength)
+        }
+        if totalBeats > 0, beatBpm > 0 || bpm > 0 {
+            let b = liveBeat > 0 ? liveBeat : currentBeat
+            let useBpm = beatBpm > 0 ? beatBpm : bpm
+            return max(0, b * 60.0 / useBpm)
+        }
+        return nil
     }
 }
 
 /// Un dispositivo StageLinq descubierto (p. ej. un Denon SC6000).
 public final class StageLinqDevice: ObservableObject, Identifiable {
-    public let id: String // "ip:puerto"
+    public let id: String // "ip:puerto" del primer HOWDY (clave estable en UI)
     public let token: [UInt8]
     public let source: String
     public let name: String
     public let version: String
-    public let ip: String
-    public let port: UInt16
+    /// Endpoint vivo: puede cambiar Wi‑Fi ↔ Ethernet sin duplicar el token.
+    public private(set) var ip: String
+    public private(set) var port: UInt16
 
     @Published public var connectionState: ConnectionState = .discovered
     @Published public var errorMessage: String = ""
@@ -100,12 +128,33 @@ public final class StageLinqDevice: ObservableObject, Identifiable {
         self.port = info.port
     }
 
+    /// Actualiza IP/puerto del HOWDY sin crear otra fila (mismo token).
+    public func applyEndpoint(ip: String, port: UInt16) {
+        if !ip.isEmpty { self.ip = ip }
+        if port != 0 { self.port = port }
+    }
+
     /// Solo el simulador STAGE CONNECT TEST (token o nombre exacto).
     /// `contains("SIM")` marcaría un SC6000 real (p. ej. "SIMON") como TEST:
     /// se saltaría el HOWDY unicast y `entries()` lo ocultaría.
     public var isDenonSimulator: Bool {
         if token == DenonSimulator.announcementToken { return true }
         return Self.isDenonSimulatorName(name)
+    }
+
+    /// Servicios auxiliares del SC6000 (no son el reproductor de cabina).
+    public var isAuxiliaryStageLinq: Bool {
+        let u = name.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if u.isEmpty { return false }
+        if u == "OFFLINEANALYZER" || u.hasPrefix("OFFLINEANALYZER") { return true }
+        if u == "FILETRANSFER" || u.hasPrefix("FILETRANSFER") { return true }
+        if u == "BROADCAST" || u == "SYNCING" { return true }
+        return false
+    }
+
+    /// Unidad de deck (SC6000 / JP…): no SIM y no servicio auxiliar.
+    public var isDenonPlayerUnit: Bool {
+        !isDenonSimulator && !isAuxiliaryStageLinq
     }
 
     public static func isDenonSimulatorName(_ raw: String) -> Bool {

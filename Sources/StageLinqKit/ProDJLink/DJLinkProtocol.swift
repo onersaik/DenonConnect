@@ -31,8 +31,9 @@ public enum DJLink {
         playerNumber == Int(virtualPlayerNumber) || model == virtualModelName
     }
 
-    /// Solo el CDJ virtual de STAGE CONNECT (player 7). El PioneerSimulator
-    /// de TEST en este Mac SÍ se muestra, con título/BPM/waveform vía TestLink.
+    /// Solo el CDJ virtual de STAGE CONNECT (player 7 / modelo propio).
+    /// El PioneerSimulator TEST en IP local se filtra en handleAnnounce
+    /// (no upsert, sin drop) para no pisar un CDJ LAN; TestLink lo pinta.
     public static func shouldIgnoreIncomingPioneer(
         playerNumber: Int,
         model: String,

@@ -359,3 +359,43 @@ public final class TCPConnection {
 
     deinit { close() }
 }
+
+/// Log de protocolo en `~/Library/Logs/STAGE CONNECT.log` y stderr.
+/// Sirve para comprobar bind 51337/50000/50001/50002 sin una segunda copia.
+public enum ProtocolLog {
+    public static var fileURL: URL {
+        let dir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Logs", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("STAGE CONNECT.log")
+    }
+
+    private static let lock = NSLock()
+    private static var prepared = false
+
+    public static func resetForLaunch() {
+        lock.lock()
+        defer { lock.unlock() }
+        try? Data().write(to: fileURL, options: .atomic)
+        prepared = true
+    }
+
+    public static func append(_ message: String) {
+        let line = message.hasSuffix("\n") ? message : message + "\n"
+        let data = Data(line.utf8)
+        lock.lock()
+        defer { lock.unlock() }
+        if !prepared {
+            try? Data().write(to: fileURL, options: .atomic)
+            prepared = true
+        }
+        if let handle = try? FileHandle(forWritingTo: fileURL) {
+            defer { try? handle.close() }
+            _ = try? handle.seekToEnd()
+            handle.write(data)
+        } else {
+            try? data.write(to: fileURL)
+        }
+        FileHandle.standardError.write(data)
+    }
+}

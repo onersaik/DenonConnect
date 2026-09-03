@@ -233,10 +233,18 @@ struct WaveformView: View {
             let a = Double(maxInSlice(peaks, time: t, slice: sliceSeconds)) * scale
             return Bands(low: a, mid: a, high: a)
         }
-        // Sin picos reales (CDJ/SC6000): envolvente plana, no un código de barras senoidal.
+        // Sin picos reales: envolvente procedural con variación por seed+tiempo.
         let inTrack = durationSeconds > 0 && t >= 0 && t <= durationSeconds
         if inTrack {
-            return Bands(low: 0.16 * scale, mid: 0.13 * scale, high: 0.11 * scale)
+            let col = durationSeconds > 0 ? Int(t / durationSeconds * 800) : 0
+            var h = UInt64(bitPattern: Int64(trackSeed &* 31 &+ col))
+            h = (h ^ (h >> 30)) &* 0xbf58476d1ce4e5b9
+            h = (h ^ (h >> 27)) &* 0x94d049bb133111eb
+            h = h ^ (h >> 31)
+            let r = Double(h % 512) / 1024.0
+            return Bands(low: (0.35 + r * 0.45) * scale,
+                         mid: (0.25 + r * 0.35) * scale,
+                         high: (0.15 + r * 0.25) * scale)
         }
         return Bands(low: 0, mid: 0, high: 0)
     }

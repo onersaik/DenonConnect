@@ -79,6 +79,12 @@ public final class ProDJLinkDevice: ObservableObject, Identifiable {
         DJLink.isVirtualCDJ(playerNumber: playerNumber, model: model)
     }
 
+    /// Export / laptop rekordbox en Pro DJ Link (no CDJ hardware).
+    public var isRekordboxExport: Bool {
+        let m = model.lowercased()
+        return m.contains("rekordbox") || m.contains("rekord box")
+    }
+
     /// PioneerSimulator de STAGE CONNECT TEST en este Mac (misma IP, no player 7).
     /// Un CDJ de LAN tiene otra IP: nunca es local.
     public var isLocalTestSimulator: Bool {
@@ -112,6 +118,8 @@ public final class ProDJLinkDevice: ObservableObject, Identifiable {
     @Published public var isMixer: Bool = false
     /// No @Published: actualizarlo en cada paquete reventaba SwiftUI.
     public var lastSeen: Date = Date()
+    /// Marca del último playhead de red. Solo para interpolar entre paquetes (30 fps).
+    public var positionReceivedAt: Date = .distantPast
     /// Pulso limitado (~4 Hz) para el LED RX sin redibujar a cada datagrama.
     @Published public var activityTick: UInt8 = 0
     var lastActivityPublish: Date = .distantPast
@@ -149,6 +157,9 @@ public final class ProDJLinkManager: ObservableObject {
     private var beatSocket: UDPSocket?
     private var loggedUnicastPeers: Set<String> = []
     private var stoppedFlag = false
+    /// Evita un segundo start() con listeners vivos: REUSEADDR en :50000
+    /// repartiría datagramas entre dos sockets (CDJ/Dual se pierden).
+    private var listenersStarted = false
     private var loggedIgnoreKeys: Set<String> = []
     private var loggedStatusKeys: Set<String> = []
     private var loggedHelloKeys: Set<String> = []
@@ -162,12 +173,15 @@ public final class ProDJLinkManager: ObservableObject {
     /// después recibe otra ráfaga (broadcast no basta si llegó tarde).
     private var startupClaimsDone = false
     private var lateHandshakePending = false
+    /// Hasta esta fecha el keepalive virtual va a ~5 Hz (reconexión Ethernet).
+    private var announceBurstUntil: Date = .distantPast
 
     public init() {}
 
     private var stopped: Bool { bookkeepingQueue.sync { stoppedFlag } }
 
     public func log(_ message: String) {
+        ProtocolLog.append(message)
         DispatchQueue.main.async {
             self.logLines.append(message)
             if self.logLines.count > 400 {
@@ -177,11 +191,15 @@ public final class ProDJLinkManager: ObservableObject {
     }
 
     public func start() {
-        bookkeepingQueue.sync {
+        let launch: Bool = bookkeepingQueue.sync {
+            if listenersStarted { return false }
+            listenersStarted = true
             stoppedFlag = false
             startupClaimsDone = false
             lateHandshakePending = false
+            return true
         }
+        guard launch else { return }
         log("Pro DJ Link: arranque · \(NetworkInfo.lanIfacesLog()) · \(NetworkInfo.announceFromLog())")
         netQueue.async { [weak self] in self?.runKeepAliveListener() }
         netQueue.async { [weak self] in self?.runStatusListener() }
@@ -190,8 +208,21 @@ public final class ProDJLinkManager: ObservableObject {
         netQueue.async { [weak self] in self?.runStalePrune() }
     }
 
+    /// Cable/Wi‑Fi de vuelta: handshake virtual + keepalive a tope.
+    public func kickNetworkRecovery(reason: String) {
+        guard bookkeepingQueue.sync(execute: { listenersStarted && !stoppedFlag }) else { return }
+        log("Pro DJ Link: recuperación rápida — \(reason)")
+        bookkeepingQueue.sync {
+            lateHandshakePending = true
+            announceBurstUntil = Date().addingTimeInterval(4)
+        }
+    }
+
     public func stop() {
-        bookkeepingQueue.sync { stoppedFlag = true }
+        bookkeepingQueue.sync {
+            stoppedFlag = true
+            listenersStarted = false
+        }
         keepAliveSocket?.close()
         statusSocket?.close()
         beatSocket?.close()
@@ -268,6 +299,13 @@ public final class ProDJLinkManager: ObservableObject {
         }
         if announce.isMixer {
             noteMixer(announce, ip: ip)
+            return
+        }
+        // PioneerSimulator TEST en este Mac: no upsert (misma player # que un
+        // CDJ real → pisa la IP). Nunca drop: borrar por player # mataría el
+        // CDJ LAN que ya está en el roster. Player 7 virtual ya se filtró.
+        // Sin CDJ LAN, TestLink pinta TEST (no hace falta fila UDP local).
+        if NetworkInfo.isLocalIPv4(ip) {
             return
         }
         if !announce.hasStableIdentity || announce.playerNumber <= 0 {
@@ -396,7 +434,7 @@ public final class ProDJLinkManager: ObservableObject {
         )
     }
 
-    /// Broadcast 255.255.255.255:50000 y unicast a cada CDJ 1–6 de LAN.
+    /// Broadcast 255.255.255.255:50000 (y directed) en todas las en*, más unicast a cada CDJ 1–6.
     /// Si el peer está en otra iface, reconstruye IP/MAC locales.
     private func emitVirtualAnnounce(
         _ sock: UDPSocket,
@@ -407,6 +445,21 @@ public final class ProDJLinkManager: ObservableObject {
     ) {
         let broadcastPacket = build(defaultIP, defaultMAC)
         sock.send(broadcastPacket, to: "255.255.255.255", port: DJLink.keepAlivePort)
+
+        // Misma lógica que StageLinq: Ethernet preferido no debe silenciar Wi‑Fi.
+        for lan in NetworkInfo.allLANAddresses() {
+            guard lan.ip != defaultIP else {
+                if let directed = NetworkInfo.subnetBroadcast(for: lan) {
+                    sock.send(broadcastPacket, to: directed, port: DJLink.keepAlivePort)
+                }
+                continue
+            }
+            let pkt = build(lan.ip, NetworkInfo.localMACBytes(forIPv4: lan.ip))
+            sendAnnounce(pkt, to: "255.255.255.255", port: DJLink.keepAlivePort, from: lan, fallback: sock)
+            if let directed = NetworkInfo.subnetBroadcast(for: lan) {
+                sendAnnounce(pkt, to: directed, port: DJLink.keepAlivePort, from: lan, fallback: sock)
+            }
+        }
 
         let peers = lanUnicastPeers()
         let liveIPs = Set(peers.map(\.ip))
@@ -566,7 +619,8 @@ public final class ProDJLinkManager: ObservableObject {
                 self.virtualKeepAlivePacket(ip: ip, mac: mac)
             }
 
-            Thread.sleep(forTimeInterval: 1.5)
+            let burst = bookkeepingQueue.sync { Date() < announceBurstUntil }
+            Thread.sleep(forTimeInterval: burst ? 0.2 : 1.5)
         }
         sock.close()
     }
@@ -640,6 +694,7 @@ public final class ProDJLinkManager: ObservableObject {
                 self.devices.removeAll { device in
                     stale.contains { $0.playerNumber == device.playerNumber }
                 }
+                self.rosterRevision &+= 1
             }
             for d in stale {
                 log(" CDJ ausente: \(d.model) · reproductor \(d.playerNumber)")
@@ -786,10 +841,14 @@ public final class ProDJLinkManager: ObservableObject {
         }
         target.lastSeen = Date()
         if NetworkInfo.isLocalIPv4(ip) { return }
+        let recvAt = Date()
         DispatchQueue.main.async {
             target.pulseActivityIfNeeded()
             if abs(target.trackLength - pos.trackLength) > 0.01 { target.trackLength = pos.trackLength }
-            if abs(target.playhead - pos.playhead) > 0.001 { target.playhead = pos.playhead }
+            if abs(target.playhead - pos.playhead) > 0.001 {
+                target.playhead = pos.playhead
+                target.positionReceivedAt = recvAt
+            }
             if !target.hasPosition { target.hasPosition = true }
         }
     }
@@ -967,7 +1026,10 @@ public final class ProDJLinkManager: ObservableObject {
             if target.beatCount != status.beatCount { target.beatCount = status.beatCount }
             if !target.hasPosition, status.beatCount > 0, status.trackBPM > 0 {
                 let estimated = Double(status.beatCount) * 60.0 / status.trackBPM
-                if abs(target.playhead - estimated) > 0.05 { target.playhead = estimated }
+                if abs(target.playhead - estimated) > 0.05 {
+                    target.playhead = estimated
+                    target.positionReceivedAt = Date()
+                }
             }
             if !target.hasStatus { target.hasStatus = true }
         }
