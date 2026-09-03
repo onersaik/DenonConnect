@@ -2,89 +2,98 @@ swift-driver version: 1.90.11.1 Apple Swift version 5.10 (swiftlang-5.10.0.13 cl
 Target: arm64-apple-macosx14.0
 Building for debugging...
 [0/12] Write sources
-[3/12] Write DJSimulatorApp-entitlement.plist
-[4/12] Write SC6000ConnectApp-entitlement.plist
+[3/12] Write SC6000ConnectApp-entitlement.plist
+[4/12] Write DJSimulatorApp-entitlement.plist
 [5/12] Write swift-version-76B232A4806BA581.txt
-[7/31] Compiling StageLinqKit SyncSnapshot.swift
-[8/31] Compiling StageLinqKit DBServerClient.swift
-[9/31] Compiling StageLinqKit DJLinkProtocol.swift
-[10/31] Compiling StageLinqKit NetworkInfo.swift
-[11/31] Compiling StageLinqKit ProDJLinkManager.swift
-[12/31] Compiling StageLinqKit ProceduralWaveform.swift
-[13/31] Compiling StageLinqKit Protocol.swift
-[14/31] Compiling StageLinqKit ServiceConnection.swift
-[15/31] Compiling StageLinqKit DenonSimulator.swift
-[16/31] Compiling StageLinqKit BeatInfoService.swift
-/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:148:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
-            guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
-                                                                                     ^
-[17/31] Compiling StageLinqKit ByteIO.swift
-/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:148:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
-            guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
-                                                                                     ^
-[18/31] Compiling StageLinqKit Models.swift
-/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:148:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
-            guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
-                                                                                     ^
-[19/31] Compiling StageLinqKit MusicalKey.swift
-/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:148:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
-            guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
-                                                                                     ^
-[20/31] Compiling StageLinqKit NetworkDevice.swift
-/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:148:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
-            guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
-                                                                                     ^
-[21/31] Compiling StageLinqKit LTCGenerator.swift
-/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:148:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
-            guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
-                                                                                     ^
-[22/31] Compiling StageLinqKit MIDITimecodeGenerator.swift
-/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:148:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
-            guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
-                                                                                     ^
-[23/31] Compiling StageLinqKit OSCClient.swift
-/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:148:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
-            guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
-                                                                                     ^
-[24/31] Compiling StageLinqKit ResolumeBridge.swift
-/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:148:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
-            guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
-                                                                                     ^
-[25/31] Emitting module StageLinqKit
-[26/39] Compiling StageLinqKit PioneerSimulator.swift
+[7/31] Emitting module StageLinqKit
+[8/39] Compiling StageLinqKit SyncSnapshot.swift
+[9/39] Compiling StageLinqKit DBServerClient.swift
+[10/39] Compiling StageLinqKit DJLinkProtocol.swift
+[11/39] Compiling StageLinqKit NetworkInfo.swift
+[12/39] Compiling StageLinqKit ProDJLinkManager.swift
+[13/39] Compiling StageLinqKit ProceduralWaveform.swift
+[14/39] Compiling StageLinqKit Protocol.swift
+[15/39] Compiling StageLinqKit ServiceConnection.swift
+[16/39] Compiling StageLinqKit DenonSimulator.swift
+[17/39] Compiling StageLinqKit PioneerSimulator.swift
 /Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/SoftwareDJ/SoftwareDJManager.swift:482:17: warning: 'CC_MD5' was deprecated in macOS 10.15: This function is cryptographically broken and should not be used in security contexts. Clients should migrate to SHA256 (or stronger).
             _ = CC_MD5(ptr.baseAddress, CC_LONG(data.count), &out)
                 ^
-[27/39] Compiling StageLinqKit Sockets.swift
+[18/39] Compiling StageLinqKit Sockets.swift
 /Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/SoftwareDJ/SoftwareDJManager.swift:482:17: warning: 'CC_MD5' was deprecated in macOS 10.15: This function is cryptographically broken and should not be used in security contexts. Clients should migrate to SHA256 (or stronger).
             _ = CC_MD5(ptr.baseAddress, CC_LONG(data.count), &out)
                 ^
-[28/39] Compiling StageLinqKit SoftwareDJManager.swift
+[19/39] Compiling StageLinqKit SoftwareDJManager.swift
 /Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/SoftwareDJ/SoftwareDJManager.swift:482:17: warning: 'CC_MD5' was deprecated in macOS 10.15: This function is cryptographically broken and should not be used in security contexts. Clients should migrate to SHA256 (or stronger).
             _ = CC_MD5(ptr.baseAddress, CC_LONG(data.count), &out)
                 ^
-[29/39] Compiling StageLinqKit StageLinqManager.swift
+[20/39] Compiling StageLinqKit StageLinqManager.swift
 /Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/SoftwareDJ/SoftwareDJManager.swift:482:17: warning: 'CC_MD5' was deprecated in macOS 10.15: This function is cryptographically broken and should not be used in security contexts. Clients should migrate to SHA256 (or stronger).
             _ = CC_MD5(ptr.baseAddress, CC_LONG(data.count), &out)
                 ^
-[30/39] Compiling StageLinqKit StateMapService.swift
+[21/39] Compiling StageLinqKit StateMapService.swift
 /Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/SoftwareDJ/SoftwareDJManager.swift:482:17: warning: 'CC_MD5' was deprecated in macOS 10.15: This function is cryptographically broken and should not be used in security contexts. Clients should migrate to SHA256 (or stronger).
             _ = CC_MD5(ptr.baseAddress, CC_LONG(data.count), &out)
                 ^
-[31/39] Compiling StageLinqKit StatePaths.swift
+[22/39] Compiling StageLinqKit StatePaths.swift
 /Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/SoftwareDJ/SoftwareDJManager.swift:482:17: warning: 'CC_MD5' was deprecated in macOS 10.15: This function is cryptographically broken and should not be used in security contexts. Clients should migrate to SHA256 (or stronger).
             _ = CC_MD5(ptr.baseAddress, CC_LONG(data.count), &out)
                 ^
-[32/39] Compiling StageLinqKit StateValue.swift
+[23/39] Compiling StageLinqKit StateValue.swift
 /Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/SoftwareDJ/SoftwareDJManager.swift:482:17: warning: 'CC_MD5' was deprecated in macOS 10.15: This function is cryptographically broken and should not be used in security contexts. Clients should migrate to SHA256 (or stronger).
             _ = CC_MD5(ptr.baseAddress, CC_LONG(data.count), &out)
                 ^
-[33/39] Compiling StageLinqKit TestLink.swift
+[24/39] Compiling StageLinqKit TestLink.swift
 /Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/SoftwareDJ/SoftwareDJManager.swift:482:17: warning: 'CC_MD5' was deprecated in macOS 10.15: This function is cryptographically broken and should not be used in security contexts. Clients should migrate to SHA256 (or stronger).
             _ = CC_MD5(ptr.baseAddress, CC_LONG(data.count), &out)
                 ^
-[34/58] Emitting module DJSimulatorApp
-[35/58] Compiling DJSimulatorApp DJSimulatorApp.swift
+[25/39] Compiling StageLinqKit BeatInfoService.swift
+/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:155:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
+            guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
+                                                                                     ^
+[26/39] Compiling StageLinqKit ByteIO.swift
+/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:155:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
+            guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
+                                                                                     ^
+[27/39] Compiling StageLinqKit Models.swift
+/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:155:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
+            guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
+                                                                                     ^
+[28/39] Compiling StageLinqKit MusicalKey.swift
+/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:155:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
+            guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
+                                                                                     ^
+[29/39] Compiling StageLinqKit NetworkDevice.swift
+/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:155:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
+            guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
+                                                                                     ^
+[30/39] Compiling StageLinqKit LTCGenerator.swift
+/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:155:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
+            guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
+                                                                                     ^
+[31/39] Compiling StageLinqKit MIDITimecodeGenerator.swift
+/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:155:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
+            guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
+                                                                                     ^
+[32/39] Compiling StageLinqKit OSCClient.swift
+/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:155:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
+            guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
+                                                                                     ^
+[33/39] Compiling StageLinqKit ResolumeBridge.swift
+/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:155:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
+            guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
+                                                                                     ^
+[34/58] Emitting module SC6000ConnectApp
+[35/66] Compiling SC6000ConnectApp SC6000ConnectApp.swift
+[36/66] Compiling SC6000ConnectApp Theme.swift
+[37/66] Compiling SC6000ConnectApp ThemeStore.swift
+[38/66] Compiling SC6000ConnectApp TracklistStore.swift
+[39/66] Compiling SC6000ConnectApp TracklistWindow.swift
+[40/66] Compiling SC6000ConnectApp WaveformView.swift
+[41/66] Compiling SC6000ConnectApp WaveformZoom.swift
+[42/66] Compiling SC6000ConnectApp WebServer.swift
+[43/66] Emitting module DJSimulatorApp
+[44/66] Compiling DJSimulatorApp DJSimulatorApp.swift
 /Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:255:40: warning: reference to captured var 'self' in concurrently-executing code; this is an error in Swift 6
             DispatchQueue.main.async { self?.syncPositions() }
                                        ^
@@ -130,38 +139,29 @@ Building for debugging...
 /Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:1070:33: warning: 'stringValue' was deprecated in macOS 13.0: Use load(.stringValue) instead
                 if let s = item.stringValue { comment = s.trimmingCharacters(in: .whitespacesAndNewlines) }
                                 ^
-[35/58] Write Objects.LinkFileList
-[36/58] Linking DJSimulatorApp
-[37/58] Applying DJSimulatorApp
-[39/58] Compiling SC6000ConnectApp ActivationView.swift
-[40/58] Compiling SC6000ConnectApp AppUpdateStore.swift
-[41/58] Compiling SC6000ConnectApp ArtworkFetcher.swift
-[42/58] Compiling SC6000ConnectApp ContentView.swift
-[43/58] Compiling SC6000ConnectApp DeckLabelStore.swift
-[44/58] Compiling SC6000ConnectApp FlowLayout.swift
-[45/58] Compiling SC6000ConnectApp LicenseStore.swift
-[46/58] Compiling SC6000ConnectApp LocalizationStore.swift
-[47/58] Emitting module SC6000ConnectApp
-[48/58] Compiling SC6000ConnectApp LogView.swift
-[49/58] Compiling SC6000ConnectApp MappingController.swift
-[50/58] Compiling SC6000ConnectApp MonitorModel.swift
-[51/58] Compiling SC6000ConnectApp MonitorWindow.swift
-[52/58] Compiling SC6000ConnectApp NetworkRecovery.swift
-[53/58] Compiling SC6000ConnectApp OutputController.swift
-[54/58] Compiling SC6000ConnectApp OutputsView.swift
-[55/58] Compiling SC6000ConnectApp PlayerDeckRow.swift
-[56/66] Compiling SC6000ConnectApp SC6000ConnectApp.swift
-[57/66] Compiling SC6000ConnectApp Theme.swift
-[58/66] Compiling SC6000ConnectApp ThemeStore.swift
-[59/66] Compiling SC6000ConnectApp TracklistStore.swift
-[60/66] Compiling SC6000ConnectApp TracklistWindow.swift
-[61/66] Compiling SC6000ConnectApp WaveformView.swift
-[62/66] Compiling SC6000ConnectApp WaveformZoom.swift
-[63/66] Compiling SC6000ConnectApp WebServer.swift
+[44/66] Write Objects.LinkFileList
+[45/66] Linking DJSimulatorApp
+[46/66] Applying DJSimulatorApp
+[48/66] Compiling SC6000ConnectApp ActivationView.swift
+[49/66] Compiling SC6000ConnectApp AppUpdateStore.swift
+[50/66] Compiling SC6000ConnectApp ArtworkFetcher.swift
+[51/66] Compiling SC6000ConnectApp ContentView.swift
+[52/66] Compiling SC6000ConnectApp DeckLabelStore.swift
+[53/66] Compiling SC6000ConnectApp FlowLayout.swift
+[54/66] Compiling SC6000ConnectApp LicenseStore.swift
+[55/66] Compiling SC6000ConnectApp LocalizationStore.swift
+[56/66] Compiling SC6000ConnectApp LogView.swift
+[57/66] Compiling SC6000ConnectApp MappingController.swift
+[58/66] Compiling SC6000ConnectApp MonitorModel.swift
+[59/66] Compiling SC6000ConnectApp MonitorWindow.swift
+[60/66] Compiling SC6000ConnectApp NetworkRecovery.swift
+[61/66] Compiling SC6000ConnectApp OutputController.swift
+[62/66] Compiling SC6000ConnectApp OutputsView.swift
+[63/66] Compiling SC6000ConnectApp PlayerDeckRow.swift
 [63/66] Write Objects.LinkFileList
 [64/66] Linking SC6000ConnectApp
 [65/66] Applying SC6000ConnectApp
-Build complete! (35.65s)
+Build complete! (28.44s)
 === RELEASE ===
 Building for production...
 [0/8] Write sources
@@ -170,7 +170,7 @@ Building for production...
 /Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/SoftwareDJ/SoftwareDJManager.swift:482:17: warning: 'CC_MD5' was deprecated in macOS 10.15: This function is cryptographically broken and should not be used in security contexts. Clients should migrate to SHA256 (or stronger).
             _ = CC_MD5(ptr.baseAddress, CC_LONG(data.count), &out)
                 ^
-/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:148:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
+/Users/runner/work/DenonConnect/DenonConnect/Sources/StageLinqKit/Output/LTCGenerator.swift:155:86: warning: forming 'UnsafeMutableRawPointer' to a variable of type 'CFString'; this is likely incorrect because 'CFString' may contain an object reference.
             guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr
                                                                                      ^
 [6/11] Compiling DJSimulatorApp DJSimulatorApp.swift
@@ -224,6 +224,6 @@ Building for production...
 [9/11] Compiling SC6000ConnectApp ActivationView.swift
 [9/11] Write Objects.LinkFileList
 [10/11] Linking SC6000ConnectApp
-Build complete! (51.26s)
+Build complete! (53.05s)
 
-=== resultado: build=success release=success sha=1cdfb20605bea1c62b6d6833a374f2745b40f1f6 ===
+=== resultado: build=success release=success sha=8890c840419bdfc0cd59cb41a93238189d3c6c38 ===
