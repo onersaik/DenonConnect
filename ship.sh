@@ -43,12 +43,26 @@ gh run watch "$RUN_ID" --exit-status
 # 5) descarga, descomprime, quita cuarentena y deja la app en el Escritorio
 TMP_DL=$(mktemp -d)
 gh run download "$RUN_ID" --dir "$TMP_DL"
-unzip -o "$TMP_DL/STAGECONNECT.zip" -d "$TMP_DL"
-xattr -cr "$TMP_DL/STAGE CONNECT.app"
+# gh anida cada artefacto en su propia subcarpeta (nombre del artefacto):
+# el zip puede estar en $TMP_DL/STAGE-CONNECT-app/STAGECONNECT.zip, no suelto.
+ZIP_PATH=$(find "$TMP_DL" -name "STAGECONNECT.zip" -print -quit)
+if [ -z "$ZIP_PATH" ]; then
+  echo "No se encontro STAGECONNECT.zip en el artefacto descargado:" >&2
+  find "$TMP_DL" >&2
+  exit 1
+fi
+unzip -o "$ZIP_PATH" -d "$TMP_DL"
+APP_PATH=$(find "$TMP_DL" -name "STAGE CONNECT.app" -maxdepth 3 -print -quit)
+if [ -z "$APP_PATH" ]; then
+  echo "No se encontro STAGE CONNECT.app tras descomprimir:" >&2
+  find "$TMP_DL" >&2
+  exit 1
+fi
+xattr -cr "$APP_PATH"
 
 mkdir -p "$DEST_DIR"
 rm -rf "$DEST_APP"
-mv "$TMP_DL/STAGE CONNECT.app" "$DEST_APP"
+mv "$APP_PATH" "$DEST_APP"
 rm -rf "$TMP_DL"
 
 open "$DEST_APP"
