@@ -5,6 +5,13 @@
 set -e
 cd "$(dirname "$0")"
 
+# 0) limpieza defensiva: locks sueltos o un rebase a medias de una vez anterior
+rm -f .git/index.lock .git/HEAD.lock .git/ORIG_HEAD.lock 2>/dev/null || true
+if [ -d .git/rebase-merge ] || [ -d .git/rebase-apply ]; then
+  git rebase --abort 2>/dev/null || true
+fi
+git checkout main 2>/dev/null || true
+
 # 1) si hay cambios locales, los commitea (menos el log de CI, que es del CI)
 git checkout -- ci/build-log.txt 2>/dev/null || true
 if ! git diff --quiet || ! git diff --cached --quiet; then
