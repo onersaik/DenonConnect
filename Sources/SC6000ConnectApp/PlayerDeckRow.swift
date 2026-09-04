@@ -37,6 +37,11 @@ struct DeckDisplay: Identifiable {
     let loopInFraction: Double?         // 0…1
     let loopOutFraction: Double?        // 0…1
     var extraCueFractions: [Double] = []
+    /// Loop activo en el reproductor (Engine / overlay / Pioneer Loop).
+    var loopEnabled: Bool = false
+    var loopSizeBeats: Double = 0
+    /// Índices 1…8 de QuickLoop activos (Denon).
+    var activeQuickLoops: [Int] = []
     var peaks: [UInt8] = []             // waveform real (TEST); vacío = procedural
     var peaksLow: [UInt8] = []
     var peaksMid: [UInt8] = []
@@ -124,6 +129,7 @@ struct PlayerDeckRow: View {
     @EnvironmentObject private var artwork: ArtworkFetcher
     @EnvironmentObject private var labels: DeckLabelStore
     @EnvironmentObject private var outputs: OutputController
+    @EnvironmentObject private var localization: LocalizationStore
     @Environment(\.waveformWindowSeconds) private var waveformWindowSeconds
     @State private var editingTag = false
     @State private var tagDraft = ""
@@ -213,6 +219,8 @@ struct PlayerDeckRow: View {
                     .foregroundColor(deck.loaded ? Theme.ledGreen : Theme.textTertiary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
+
+                cueLoopBadges
 
                 HStack(spacing: 8) {
                     if !artistText.isEmpty {
@@ -628,6 +636,7 @@ struct PlayerDeckRow: View {
                         .font(.system(size: 12, weight: .bold))
                         .foregroundColor(deck.loaded ? Theme.ledGreen : Theme.textTertiary)
                         .lineLimit(1)
+                    cueLoopBadges
                     if !artistText.isEmpty {
                         Text(artistText)
                             .font(.system(size: 9))
@@ -743,14 +752,16 @@ struct PlayerDeckRow: View {
             loopInFraction:      deck.loopInFraction,
             loopOutFraction:     deck.loopOutFraction,
             mode:                mode,
-            windowSeconds:       windowSeconds
+            windowSeconds:       windowSeconds,
+            playbackRate:        deck.playbackRate ?? 1.0
         )
     }
 
     private func playStateBadge(compact: Bool) -> some View {
         let playing = deck.isPlaying
         let paused = deck.loaded && !playing
-        let label = playing ? "PLAY" : (paused ? "PAUSA" : "STOP")
+        let label = playing ? localization.t("deck.play")
+            : (paused ? localization.t("deck.pause") : localization.t("deck.stop"))
         let color = playing ? Theme.ledGreen : (paused ? Theme.yellow : Theme.textTertiary)
         return VStack(spacing: compact ? 1 : 2) {
             Circle()
@@ -762,7 +773,8 @@ struct PlayerDeckRow: View {
                 .tracking(0.3)
                 .foregroundColor(color)
         }
-        .help(playing ? "Reproduciendo" : (paused ? "En pausa" : "Parado"))
+        .help(label)
+        .id(localization.language)
     }
 
     private var lockButton: some View {
@@ -770,7 +782,7 @@ struct PlayerDeckRow: View {
             HStack(spacing: 3) {
                 Image(systemName: isLocked ? "lock.fill" : "lock.open")
                     .font(.system(size: 7))
-                Text("LOCK")
+                Text(localization.t("deck.lock"))
                     .font(.system(size: 8, weight: .bold))
                     .tracking(0.3)
                     .lineLimit(1)
@@ -798,7 +810,7 @@ struct PlayerDeckRow: View {
                     Image(systemName: "dot.radiowaves.left.and.right")
                         .font(.system(size: 7))
                 }
-                Text("SMPTE")
+                Text(localization.t("deck.smpte"))
                     .font(.system(size: 8, weight: .bold))
                     .tracking(0.3)
                     .lineLimit(1)
@@ -824,7 +836,7 @@ struct PlayerDeckRow: View {
             HStack(spacing: 3) {
                 Image(systemName: isMasterFocus ? "crown.fill" : "crown")
                     .font(.system(size: 7))
-                Text("MST")
+                Text(localization.t("deck.master"))
                     .font(.system(size: 8, weight: .bold))
                     .tracking(0.3)
                     .lineLimit(1)
@@ -846,10 +858,48 @@ struct PlayerDeckRow: View {
     }
 
     private var titleText: String {
-        if !deck.loaded { return "SIN PISTA" }
+        if !deck.loaded { return localization.t("deck.notLoaded") }
         let title = TrackNaming.cleanTitle(deck.title)
-        if title.isEmpty { return "SIN TITULO" }
+        if title.isEmpty { return localization.t("deck.noTitle") }
         return title
+    }
+
+    @ViewBuilder
+    private var cueLoopBadges: some View {
+        let hasCue = deck.cuePositionFraction != nil || !deck.extraCueFractions.isEmpty
+        let hasLoop = deck.loopEnabled
+            || (deck.loopInFraction != nil && deck.loopOutFraction != nil)
+        let qs = deck.activeQuickLoops
+        if hasCue || hasLoop || !qs.isEmpty {
+            HStack(spacing: 4) {
+                if hasCue {
+                    Text("CUE")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundColor(.black)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Color.orange)
+                }
+                if hasLoop {
+                    Text(deck.loopSizeBeats > 0
+                          ? String(format: "LOOP %.0fB", deck.loopSizeBeats)
+                          : "LOOP")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundColor(.black)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Theme.ledGreen)
+                }
+                ForEach(qs, id: \.self) { n in
+                    Text("QL\(n)")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundColor(.black)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 2)
+                        .background(Theme.cyan)
+                }
+            }
+        }
     }
 
     private var artistText: String {

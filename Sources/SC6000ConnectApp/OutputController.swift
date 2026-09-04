@@ -104,6 +104,16 @@ final class OutputController: ObservableObject {
     /// LOCK por fila: el Master auto-follow / fader / On Air no pisan este deck.
     /// Con LTC propio en otra salida, su generador sigue el playhead de esta fila.
     @Published var ltcDeckLocked: [String: Bool] = [:]
+    /// Volumen 0…1 por dispositivo CoreAudio (clave = "\(AudioDeviceID)").
+    @Published var ltcOutputLevels: [String: Float] = {
+        let raw = UserDefaults.standard.dictionary(forKey: "sc.ltcOutputLevels") as? [String: Double] ?? [:]
+        return raw.mapValues { Float(max(0, min(1, $0))) }
+    }() {
+        didSet {
+            let store = ltcOutputLevels.mapValues { Double($0) }
+            UserDefaults.standard.set(store, forKey: "sc.ltcOutputLevels")
+        }
+    }
     /// Caída de red con LTC ON: Seguir red / Congelar / Continuar manual.
     @Published var ltcNetworkLossMode: LTCNetworkLossMode = {
         if let raw = UserDefaults.standard.string(forKey: "sc.ltcNetworkLossMode"),
@@ -130,6 +140,21 @@ final class OutputController: ObservableObject {
     @Published var webPort: String    = "8080"
     @Published var webError: String   = ""
     @Published var obsTransparent     = true
+    @Published var obsShowTC: Bool = UserDefaults.standard.object(forKey: "sc.obs.showTC") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(obsShowTC, forKey: "sc.obs.showTC") }
+    }
+    @Published var obsShowTitle: Bool = UserDefaults.standard.object(forKey: "sc.obs.showTitle") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(obsShowTitle, forKey: "sc.obs.showTitle") }
+    }
+    @Published var obsShowArtwork: Bool = UserDefaults.standard.object(forKey: "sc.obs.showArtwork") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(obsShowArtwork, forKey: "sc.obs.showArtwork") }
+    }
+    @Published var obsShowMeta: Bool = UserDefaults.standard.object(forKey: "sc.obs.showMeta") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(obsShowMeta, forKey: "sc.obs.showMeta") }
+    }
+    @Published var obsShowDecks: Bool = UserDefaults.standard.object(forKey: "sc.obs.showDecks") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(obsShowDecks, forKey: "sc.obs.showDecks") }
+    }
     @Published var copiedHint         = ""
 
     // MARK: Reloj
@@ -197,11 +222,11 @@ final class OutputController: ObservableObject {
         timer = t
     }
 
-    func shutdown() {
+    func shutdown(forProcessExit: Bool = false) {
         timer?.invalidate()
         timer = nil
-        stopMasterLTC(silent: true)
-        stopAllDeckLTC()
+        stopMasterLTC(silent: true, forProcessExit: forProcessExit)
+        stopAllDeckLTC(forProcessExit: forProcessExit)
         mtc?.stop(); mtc = nil; mtcEnabled = false
         bridge?.stop(); bridge = nil; resolumeEnabled = false
         web?.stop(); web = nil; webEnabled = false
@@ -209,8 +234,8 @@ final class OutputController: ObservableObject {
 
     deinit {
         timer?.invalidate()
-        ltc?.stop()
-        deckLTC.values.forEach { $0.stop() }
+        ltc?.stop(forProcessExit: true)
+        deckLTC.values.forEach { $0.stop(forProcessExit: true) }
         mtc?.stop()
         bridge?.stop()
         web?.stop()
@@ -420,7 +445,8 @@ final class OutputController: ObservableObject {
         do {
             let fan = LTCFanout(name: "Master", log: { [weak self] in self?.logSink?($0) })
             fan.frameRate = ltcFrameRate
-            try fan.start(deviceIDs: ids, playhead: snap.playhead, playing: false)
+            try fan.start(deviceIDs: ids, playhead: snap.playhead, playing: false,
+                          levelsByDevice: levelsMap(for: ids))
             applyPlayhead(fan, snap)  // primer frame = playhead real; play/pause a todos
             ltc = fan
             ltcEnabled = true
@@ -434,9 +460,9 @@ final class OutputController: ObservableObject {
         }
     }
 
-    func stopMasterLTC(silent: Bool = false) {
+    func stopMasterLTC(silent: Bool = false, forProcessExit: Bool = false) {
         ltc?.setPaused(true)
-        ltc?.stop()
+        ltc?.stop(forProcessExit: forProcessExit)
         ltc = nil
         ltcEnabled = false
         ltcError = ""
@@ -474,7 +500,8 @@ final class OutputController: ObservableObject {
             let deckRate = ltcDeckFrameRates[key] ?? ltcFrameRate
             let fan = LTCFanout(name: label, log: { [weak self] in self?.logSink?($0) })
             fan.frameRate = deckRate
-            try fan.start(deviceIDs: ids, playhead: snap?.playhead, playing: false)
+            try fan.start(deviceIDs: ids, playhead: snap?.playhead, playing: false,
+                          levelsByDevice: levelsMap(for: ids))
             applyPlayhead(fan, snap)
             deckLTC[key] = fan
             ltcDeckEnabled[key] = true
@@ -488,14 +515,14 @@ final class OutputController: ObservableObject {
         }
     }
 
-    func stopDeckLTC(_ id: String, silent: Bool = false) {
+    func stopDeckLTC(_ id: String, silent: Bool = false, forProcessExit: Bool = false) {
         var keys = Set(deckLTC.keys.filter { Self.sameDeckID($0, id) })
         keys.formUnion(ltcDeckEnabled.keys.filter { Self.sameDeckID($0, id) })
         keys.insert(generatorKey(for: id))
         for key in keys {
             if let gen = deckLTC[key] {
                 gen.setPaused(true)
-                gen.stop()
+                gen.stop(forProcessExit: forProcessExit)
             }
             deckLTC[key] = nil
             ltcDeckEnabled[key] = false
@@ -564,11 +591,35 @@ final class OutputController: ObservableObject {
         return id
     }
 
-    private func stopAllDeckLTC() {
+    private func stopAllDeckLTC(forProcessExit: Bool = false) {
         for key in Array(deckLTC.keys) {
-            stopDeckLTC(key, silent: true)
+            stopDeckLTC(key, silent: true, forProcessExit: forProcessExit)
         }
     }
+
+    /// Nivel 0…1 de una salida CoreAudio (Master o deck).
+    func levelForDevice(_ deviceID: AudioDeviceID) -> Float {
+        ltcOutputLevels[Self.levelKey(deviceID)] ?? 0.5
+    }
+
+    func setLevelForDevice(_ deviceID: AudioDeviceID, level: Float) {
+        let clamped = max(0, min(1, level))
+        var map = ltcOutputLevels
+        map[Self.levelKey(deviceID)] = clamped
+        ltcOutputLevels = map
+        ltc?.setLevel(clamped, deviceID: deviceID)
+        for fan in deckLTC.values {
+            fan.setLevel(clamped, deviceID: deviceID)
+        }
+    }
+
+    private func levelsMap(for ids: [AudioDeviceID]) -> [AudioDeviceID: Float] {
+        var out: [AudioDeviceID: Float] = [:]
+        for id in ids { out[id] = levelForDevice(id) }
+        return out
+    }
+
+    private static func levelKey(_ id: AudioDeviceID) -> String { "\(id)" }
 
     // MARK: MTC
 
@@ -612,6 +663,17 @@ final class OutputController: ObservableObject {
             srv.tracklistProvider = { [weak self] in
                 self?.tracklist?.cachedBridgePayload ?? [:]
             }
+            srv.syncProvider = { [weak self] in
+                guard let self else { return [:] }
+                let snap = self.snapshotForMaster()
+                return [
+                    "fps": self.ltcFrameRate.rawValue,
+                    "playhead": snap.playhead ?? 0,
+                    "playing": snap.isPlaying,
+                    "rate": snap.playbackSpeed ?? 1.0,
+                    "ltcOn": self.ltcEnabled || self.ltcAnyEnabled,
+                ]
+            }
             srv.failureHandler = { [weak self] msg in
                 DispatchQueue.main.async {
                     self?.web?.stop()
@@ -640,8 +702,15 @@ final class OutputController: ObservableObject {
 
     func obsURL(lan: Bool, transparent: Bool? = nil) -> String {
         let base = lan ? webLANURL : webLocalURL
-        let t = transparent ?? obsTransparent
-        return t ? "\(base)/obs?t=1" : "\(base)/obs"
+        var q: [String] = []
+        if transparent ?? obsTransparent { q.append("t=1") }
+        if !obsShowTC { q.append("tc=0") }
+        if !obsShowTitle { q.append("title=0") }
+        if !obsShowArtwork { q.append("art=0") }
+        if !obsShowMeta { q.append("meta=0") }
+        if !obsShowDecks { q.append("decks=0") }
+        if q.isEmpty { return "\(base)/obs" }
+        return "\(base)/obs?\(q.joined(separator: "&"))"
     }
 
     func copyToPasteboard(_ text: String, hint: String) {
@@ -840,6 +909,7 @@ final class OutputController: ObservableObject {
                 if let v = s.progress { d["progress"] = v }
                 if let v = s.pitchPct { d["pitchPct"] = v }
                 if let v = s.tcTimecode { d["tcTimecode"] = v }
+                if let a = s.artworkDataURL, !a.isEmpty { d["artworkDataURL"] = a }
                 if let p = s.peaks, !p.isEmpty { d["peaks"] = p }
                 if let p = s.peaksLow, !p.isEmpty { d["peaksLow"] = p }
                 if let p = s.peaksMid, !p.isEmpty { d["peaksMid"] = p }
@@ -1121,9 +1191,24 @@ final class OutputController: ObservableObject {
                     let bpm = MusicalClock.bpm(overlay?.bpm ?? 0, deck.bpm, deck.beatBpm)
                     let layer = DeckDisplayBuilder.denonLayerCaption(deck.id)
                     let denonLabel = DeckDisplayBuilder.productDenonLabel(layer: deck.id)
-                    let prog  = overlay?.progress ?? deck.beatProgress
-                    let elapsed: Double? = overlay?.position ?? deck.resolvedElapsed
-                        ?? prog.flatMap { p in deck.trackLength > 0 ? p * deck.trackLength : nil }
+                    let length: Double? = {
+                        if let d = overlay?.duration, d > 0 { return d }
+                        if deck.trackLength > 0 { return deck.trackLength }
+                        let useBpm = deck.beatBpm > 0 ? deck.beatBpm : deck.bpm
+                        if deck.totalBeats > 0, useBpm > 0 {
+                            let derived = deck.totalBeats * 60.0 / useBpm
+                            if derived > 5, derived < 3600 { return derived }
+                        }
+                        return nil
+                    }()
+                    let playing = overlay?.playing ?? (deck.playState == .playing)
+                    let elapsed: Double? = overlay?.position
+                        ?? deck.interpolatedElapsed(playing: playing, length: length)
+                    let prog: Double? = {
+                        if let o = overlay?.progress { return o }
+                        guard let e = elapsed, let l = length, l > 0 else { return deck.beatProgress }
+                        return min(max(e / l, 0), 1)
+                    }()
                     let deckID = device.isDenonSimulator
                         ? DeckDisplayBuilder.testDenonID(deck.id - 1)
                         : "denon-\(device.id)-\(deck.id)"
@@ -1134,15 +1219,19 @@ final class OutputController: ObservableObject {
                             : DeckLabelKey.denon(token: device.token, layer: deck.id),
                         fallback: layer
                     )
+                    let artURL: String? = {
+                        guard let b64 = overlay?.artworkJPEG, !b64.isEmpty else { return nil }
+                        return b64.hasPrefix("data:") ? b64 : "data:image/jpeg;base64,\(b64)"
+                    }()
                     result.append(DeckSnapshot(
                         label:     denonLabel,
                         title:     TrackNaming.cleanTitle(overlay?.title ?? deck.trackTitle),
                         artist:    overlay?.artist ?? deck.trackArtist,
                         bpm:       bpm,
-                        isPlaying: overlay?.playing ?? (deck.playState == .playing),
+                        isPlaying: playing,
                         isMaster:  overlay?.isMaster ?? deck.isMaster,
                         elapsed:   elapsed,
-                        duration:  overlay?.duration ?? (deck.trackLength > 0 ? deck.trackLength : nil),
+                        duration:  length,
                         progress:  prog,
                         beatInBar: overlay != nil
                             ? MusicalClock.beatInBar(position: overlay?.position ?? 0, bpm: bpm)
@@ -1156,7 +1245,8 @@ final class OutputController: ObservableObject {
                         peaks:     (overlay?.peaks ?? deck.peaks).isEmpty ? nil : (overlay?.peaks ?? deck.peaks),
                         peaksLow:  (overlay?.peaksLow ?? deck.peaksLow).isEmpty ? nil : (overlay?.peaksLow ?? deck.peaksLow),
                         peaksMid:  (overlay?.peaksMid ?? deck.peaksMid).isEmpty ? nil : (overlay?.peaksMid ?? deck.peaksMid),
-                        peaksHigh: (overlay?.peaksHigh ?? deck.peaksHigh).isEmpty ? nil : (overlay?.peaksHigh ?? deck.peaksHigh)
+                        peaksHigh: (overlay?.peaksHigh ?? deck.peaksHigh).isEmpty ? nil : (overlay?.peaksHigh ?? deck.peaksHigh),
+                        artworkDataURL: artURL
                     ))
                 }
             }
@@ -1179,7 +1269,12 @@ final class OutputController: ObservableObject {
                 peaks:     overlay.peaks.isEmpty ? nil : overlay.peaks,
                 peaksLow:  overlay.peaksLow.isEmpty ? nil : overlay.peaksLow,
                 peaksMid:  overlay.peaksMid.isEmpty ? nil : overlay.peaksMid,
-                peaksHigh: overlay.peaksHigh.isEmpty ? nil : overlay.peaksHigh
+                peaksHigh: overlay.peaksHigh.isEmpty ? nil : overlay.peaksHigh,
+                artworkDataURL: {
+                    let b64 = overlay.artworkJPEG
+                    guard !b64.isEmpty else { return nil }
+                    return b64.hasPrefix("data:") ? b64 : "data:image/jpeg;base64,\(b64)"
+                }()
             ))
         }
         if let layers = testLink?.roster.loadedLayers {
@@ -1199,6 +1294,16 @@ final class OutputController: ObservableObject {
                     DeckLabelKey.pioneer(ip: device.ip, player: device.playerNumber),
                     fallback: "\(device.playerNumber)"
                 )
+                let length = device.trackLength > 0 ? device.trackLength : nil
+                let elapsed = device.interpolatedPlayhead(playing: device.isPlaying, length: length)
+                let prog: Double? = {
+                    guard let e = elapsed, let l = length, l > 0 else { return nil }
+                    return min(max(e / l, 0), 1)
+                }()
+                let artURL: String? = {
+                    guard !device.artworkJPEG.isEmpty else { return nil }
+                    return "data:image/jpeg;base64,\(device.artworkJPEG.base64EncodedString())"
+                }()
                 result.append(DeckSnapshot(
                     label:     DeckDisplayBuilder.productPioneerLabel(player: Int(device.playerNumber), model: device.model),
                     title:     device.trackTitle,
@@ -1206,9 +1311,9 @@ final class OutputController: ObservableObject {
                     bpm:       bpm,
                     isPlaying: device.isPlaying,
                     isMaster:  device.isMaster,
-                    elapsed:   device.resolvedPlayhead,
-                    duration:  device.trackLength > 0 ? device.trackLength : nil,
-                    progress:  device.trackLength > 0 && device.resolvedPlayhead != nil ? device.progress : nil,
+                    elapsed:   elapsed,
+                    duration:  length,
+                    progress:  prog,
                     beatInBar: device.beatInBar,
                     key:       device.trackKey,
                     pitchPct:  device.pitchPercent,
@@ -1219,7 +1324,8 @@ final class OutputController: ObservableObject {
                     peaks:     device.peaks.isEmpty ? nil : device.peaks,
                     peaksLow:  device.peaksLow.isEmpty ? nil : device.peaksLow,
                     peaksMid:  device.peaksMid.isEmpty ? nil : device.peaksMid,
-                    peaksHigh: device.peaksHigh.isEmpty ? nil : device.peaksHigh
+                    peaksHigh: device.peaksHigh.isEmpty ? nil : device.peaksHigh,
+                    artworkDataURL: artURL
                 ))
             }
         }
@@ -1253,6 +1359,11 @@ final class OutputController: ObservableObject {
 
     private func testDeckSnapshot(_ overlay: TestLinkDeck, label: String, master: Bool) -> DeckSnapshot {
         let bpm = MusicalClock.bpm(overlay.bpm)
+        let artURL: String? = {
+            let b64 = overlay.artworkJPEG
+            guard !b64.isEmpty else { return nil }
+            return b64.hasPrefix("data:") ? b64 : "data:image/jpeg;base64,\(b64)"
+        }()
         return DeckSnapshot(
             label:     label,
             title:     TrackNaming.cleanTitle(overlay.title),
@@ -1267,7 +1378,8 @@ final class OutputController: ObservableObject {
             peaks:     overlay.peaks.isEmpty ? nil : overlay.peaks,
             peaksLow:  overlay.peaksLow.isEmpty ? nil : overlay.peaksLow,
             peaksMid:  overlay.peaksMid.isEmpty ? nil : overlay.peaksMid,
-            peaksHigh: overlay.peaksHigh.isEmpty ? nil : overlay.peaksHigh
+            peaksHigh: overlay.peaksHigh.isEmpty ? nil : overlay.peaksHigh,
+            artworkDataURL: artURL
         )
     }
 
@@ -1368,9 +1480,18 @@ final class OutputController: ObservableObject {
         // tenía una señal de posición continua sobre la que medir velocidad.
         let playhead: Double? = {
             if let o = overlay { return o.position }
+            let length: Double? = {
+                if deck.trackLength > 0 { return deck.trackLength }
+                let useBpm = deck.beatBpm > 0 ? deck.beatBpm : deck.bpm
+                if deck.totalBeats > 0, useBpm > 0 {
+                    let derived = deck.totalBeats * 60.0 / useBpm
+                    if derived > 5, derived < 3600 { return derived }
+                }
+                return nil
+            }()
             return deck.interpolatedElapsed(
                 playing: deck.playState == .playing,
-                length: deck.trackLength > 0 ? deck.trackLength : nil
+                length: length
             )
         }()
         let playing = overlay?.playing ?? (deck.playState == .playing)

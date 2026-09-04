@@ -48,7 +48,7 @@ public final class StageLinqManager: ObservableObject {
         guard bookkeepingQueue.sync(execute: { listenersStarted && !stoppedFlag }) else { return }
         log("StageLinq: recuperación rápida — \(reason)")
         bookkeepingQueue.sync {
-            announceBurstUntil = Date().addingTimeInterval(4)
+            announceBurstUntil = Date().addingTimeInterval(6)
             recoveryEpoch &+= 1
             connectingKeys.removeAll()
         }
@@ -56,7 +56,7 @@ public final class StageLinqManager: ObservableObject {
             devicesByKey.values.filter { !$0.isAuxiliaryStageLinq && !$0.isDenonSimulator }
         }
         for (i, device) in players.enumerated() {
-            scheduleReconnect(device, delay: 0.12 + Double(i) * 0.05)
+            scheduleReconnect(device, delay: 0.05 + Double(i) * 0.04)
         }
     }
 
@@ -92,11 +92,14 @@ public final class StageLinqManager: ObservableObject {
         bookkeepingQueue.sync {
             stoppedFlag = true
             listenersStarted = false
+            for (_, conn) in mainConnections { conn.stop() }
+            mainConnections.removeAll()
+            for (_, svcs) in serviceConnections { svcs.forEach { $0.stop() } }
+            serviceConnections.removeAll()
+            connectingKeys.removeAll()
         }
         udpListener?.close()
-        bookkeepingQueue.sync {
-            for (_, conn) in mainConnections { conn.stop() }
-        }
+        udpListener = nil
     }
 
     // MARK: - Descubrimiento
@@ -233,7 +236,7 @@ public final class StageLinqManager: ObservableObject {
                     log("StageLinq: identidad \(StageLinq.identityName) unicast → \(peer.ip):\(StageLinq.listenPort) (\(peer.name)) vía \(via)")
                 }
             }
-            Thread.sleep(forTimeInterval: burst ? 0.2 : 1.0)
+            Thread.sleep(forTimeInterval: burst ? 0.12 : 0.85)
         }
     }
 
@@ -460,7 +463,7 @@ public final class StageLinqManager: ObservableObject {
     }
 
     private func runStateMap(device: StageLinqDevice, port: UInt16, generation: UInt64) {
-        var delay: TimeInterval = 0.2
+        var delay: TimeInterval = 0.1
         var epoch = bookkeepingQueue.sync { recoveryEpoch }
         while !stopped && deviceStillKnown(device) && currentServiceGeneration(device) == generation {
             let svc = StateMapService(host: device.ip, port: port, log: { [weak self] msg in self?.log(msg) })
@@ -496,7 +499,7 @@ public final class StageLinqManager: ObservableObject {
     }
 
     private func runBeatInfo(device: StageLinqDevice, port: UInt16, generation: UInt64) {
-        var delay: TimeInterval = 0.2
+        var delay: TimeInterval = 0.1
         var epoch = bookkeepingQueue.sync { recoveryEpoch }
         while !stopped && deviceStillKnown(device) && currentServiceGeneration(device) == generation {
             let svc = BeatInfoService(host: device.ip, port: port, log: { [weak self] msg in self?.log(msg) })
@@ -694,6 +697,19 @@ public final class StageLinqManager: ObservableObject {
             if let v = StateValueCodec.asDouble(value) { deck.loopOutPosition = v }
         case "/Track/CurrentLoopSizeInBeats":
             if let v = StateValueCodec.asDouble(value) { deck.loopSizeBeats = v }
+        case "/Track/Loop/QuickLoop1", "/Track/Loop/QuickLoop2", "/Track/Loop/QuickLoop3",
+             "/Track/Loop/QuickLoop4", "/Track/Loop/QuickLoop5", "/Track/Loop/QuickLoop6",
+             "/Track/Loop/QuickLoop7", "/Track/Loop/QuickLoop8":
+            if let n = Int(suffix.split(separator: "/").last?.replacingOccurrences(of: "QuickLoop", with: "") ?? ""),
+               (1...8).contains(n),
+               let on = StateValueCodec.asBool(value) {
+                var q = deck.quickLoops
+                if q.count < 8 { q = Array(repeating: false, count: 8) }
+                if q[n - 1] != on {
+                    q[n - 1] = on
+                    deck.quickLoops = q
+                }
+            }
         case "/Track/TrackNetworkPath", "/Track/TrackUri":
             if let s = StateValueCodec.asString(value) {
                 deck.trackNetworkPath = s

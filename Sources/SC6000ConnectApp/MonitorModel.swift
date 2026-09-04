@@ -13,6 +13,16 @@ enum MonitorLayout: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    var locKey: String {
+        switch self {
+        case .soloTC: return "monitor.layout.tc"
+        case .datos: return "monitor.layout.data"
+        case .cdj: return "monitor.layout.cdj"
+        case .overview: return "monitor.layout.overview"
+        case .tracklist: return "monitor.layout.tracklist"
+        }
+    }
+
     var help: String {
         switch self {
         case .soloTC: return "Solo el timecode, lo mas grande posible. Negro a sangre. Ideal cabina / overlay."
@@ -48,6 +58,14 @@ enum MonitorSizePreset: String, CaseIterable, Identifiable {
         case .cabina: return CGSize(width: 1280, height: 720)
         case .hd: return CGSize(width: 1920, height: 1080)
         case .mini: return CGSize(width: 720, height: 420)
+        }
+    }
+
+    var locKey: String {
+        switch self {
+        case .cabina: return "monitor.size.cabin"
+        case .hd: return "monitor.size.hd"
+        case .mini: return "monitor.size.mini"
         }
     }
 

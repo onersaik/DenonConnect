@@ -24,6 +24,7 @@ struct OutputsView: View {
     @State private var showExportSuccess = false
 
     enum SettingsSection: String, CaseIterable {
+        case sources = "Fuentes"
         case ltc     = "LTC"
         case mtc     = "MTC"
         case osc     = "OSC"
@@ -39,6 +40,7 @@ struct OutputsView: View {
 
         var icon: String {
             switch self {
+            case .sources: return "checklist"
             case .ltc:     return "waveform.path"
             case .mtc:     return "pianokeys"
             case .osc:     return "wifi"
@@ -51,6 +53,24 @@ struct OutputsView: View {
             case .license:    return "key.fill"
             case .language:   return "globe"
             case .appearance: return "circle.lefthalf.filled"
+            }
+        }
+
+        var locKey: String {
+            switch self {
+            case .sources: return "settings.sources"
+            case .ltc: return "settings.ltc"
+            case .mtc: return "settings.mtc"
+            case .osc: return "settings.osc"
+            case .web: return "settings.web"
+            case .obs: return "settings.obs"
+            case .history: return "settings.history"
+            case .labels: return "settings.labels"
+            case .mapping: return "settings.mapping"
+            case .updates: return "settings.updates"
+            case .license: return "settings.license"
+            case .language: return "settings.language"
+            case .appearance: return "settings.appearance"
             }
         }
     }
@@ -74,11 +94,11 @@ struct OutputsView: View {
                 Image(systemName: "gearshape.2.fill")
                     .font(.system(size: 22))
                     .foregroundColor(Theme.accent)
-                Text("CONFIG")
+                Text(localization.t("settings.title"))
                     .font(.system(size: 13, weight: .bold))
                     .tracking(1.0)
                     .foregroundColor(Theme.textPrimary)
-                Text("AJUSTES")
+                Text(localization.t("settings.subtitle"))
                     .font(.system(size: 10))
                     .foregroundColor(Theme.textTertiary)
                 Text("STAGE CONNECT")
@@ -86,6 +106,7 @@ struct OutputsView: View {
                     .foregroundColor(Theme.textTertiary)
             }
             .padding(18)
+            .id(localization.language)
 
             Divider().background(Theme.panelBorder)
 
@@ -110,10 +131,11 @@ struct OutputsView: View {
                     .font(.system(size: 13))
                     .frame(width: 18)
                     .foregroundColor(active ? Theme.accent : Theme.textSecondary)
-                Text(s.rawValue)
+                Text(localization.t(s.locKey))
                     .font(.system(size: 12, weight: active ? .semibold : .regular))
                     .foregroundColor(active ? Theme.textPrimary : Theme.textSecondary)
                     .noClip()
+                    .id(localization.language)
                 Spacer(minLength: 4)
                 // Indicador activo
                 if s == .ltc && outputs.ltcAnyEnabled { dot(Theme.cyan) }
@@ -137,7 +159,7 @@ struct OutputsView: View {
         VStack(alignment: .leading, spacing: 3) {
             Divider().background(Theme.panelBorder)
             VStack(alignment: .leading, spacing: 4) {
-                Text("RELOJ")
+                Text(localization.t("common.clock"))
                     .font(.system(size: 9, weight: .bold))
                     .tracking(0.6)
                     .foregroundColor(Theme.textTertiary)
@@ -163,6 +185,7 @@ struct OutputsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 switch section {
+                case .sources: sourcesSection
                 case .ltc:     ltcSection
                 case .mtc:     mtcSection
                 case .osc:     oscSection
@@ -178,22 +201,77 @@ struct OutputsView: View {
                 }
             }
             .padding(22)
+            .id(localization.language)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: Fuentes
+
+    private var sourcesSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            sectionHeader(icon: "checklist", title: localization.t("settings.sources"),
+                          subtitle: localization.t("settings.sources.subtitle"))
+
+            settingsPanel {
+                sourceTick("Denon", isOn: $mapping.sourceDenon)
+                sourceTick("Pioneer", isOn: $mapping.sourcePioneer)
+                sourceTick("Serato", isOn: $mapping.sourceSerato)
+                sourceTick("VDJ", isOn: $mapping.sourceVDJ)
+                sourceTick("rekordbox", isOn: $mapping.sourceRekordbox)
+                sourceTick("Traktor", isOn: $mapping.sourceTraktor)
+                Divider().background(Theme.panelBorder)
+                Button {
+                    let on = !mapping.allSourcesEnabled
+                    mapping.setAllSources(on)
+                    if on { mapping.mode = .todos }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: mapping.allSourcesEnabled ? "checkmark.square.fill" : "square")
+                            .foregroundColor(mapping.allSourcesEnabled ? Theme.ledGreen : Theme.textTertiary)
+                        Text(localization.t("settings.sources.all"))
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(Theme.textPrimary)
+                        Spacer()
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+
+            Text(localization.t("settings.sources.hint"))
+                .font(.system(size: 11))
+                .foregroundColor(Theme.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func sourceTick(_ title: String, isOn: Binding<Bool>) -> some View {
+        Button { isOn.wrappedValue.toggle() } label: {
+            HStack(spacing: 8) {
+                Image(systemName: isOn.wrappedValue ? "checkmark.square.fill" : "square")
+                    .foregroundColor(isOn.wrappedValue ? Theme.ledGreen : Theme.textTertiary)
+                Text(title)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(Theme.textPrimary)
+                Spacer()
+            }
+            .padding(.vertical, 3)
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: LTC
 
     private var ltcSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            sectionHeader(icon: "waveform.path", title: "SMPTE LTC",
-                          subtitle: "MASTER es el LTC de casa: un playhead, N salidas. Sigue al deck master / On Air / el que suena. LOCK en una fila con salida propia ancla ese generador; no pisa al MASTER ni al revés. SMPTE de fila enciende el LTC de esa pista.")
+            sectionHeader(icon: "waveform.path", title: localization.t("ltc.title"),
+                          subtitle: localization.t("ltc.subtitle"))
 
             Text(outputs.ltcTimecode)
                 .font(.system(size: 32, weight: .bold, design: .monospaced))
                 .foregroundColor(outputs.ltcEnabled ? Theme.ledGreen : Theme.textTertiary.opacity(0.4))
 
-            Text("MASTER DE CASA")
+            Text(localization.t("ltc.master.home"))
                 .font(.system(size: 10, weight: .bold))
                 .tracking(0.8)
                 .foregroundColor(Theme.textTertiary)
@@ -233,7 +311,7 @@ struct OutputsView: View {
                 }
                 Divider().background(Theme.panelBorder)
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Emergencia de red")
+                    Text(localization.t("ltc.network.emergency"))
                         .font(.system(size: 11))
                         .foregroundColor(Theme.textSecondary)
                     Picker("", selection: $outputs.ltcNetworkLossMode) {
@@ -264,10 +342,10 @@ struct OutputsView: View {
                 }
                 Divider().background(Theme.panelBorder)
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Salidas Master")
+                    Text(localization.t("ltc.outputs.master"))
                         .font(.system(size: 11))
                         .foregroundColor(Theme.textSecondary)
-                    Text("Elige una o varias. El mismo TC se duplica en cada device. Si otro LTC usa el mismo canal, avisa.")
+                    Text(localization.t("ltc.outputs.hint"))
                         .font(.system(size: 10))
                         .foregroundColor(Theme.textTertiary)
                     deviceChecklist(slot: "master", selected: outputs.masterDeviceIDs) { id in
@@ -281,7 +359,7 @@ struct OutputsView: View {
                 .foregroundColor(Theme.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Text("POR REPRODUCTOR")
+            Text(localization.t("ltc.per.player"))
                 .font(.system(size: 10, weight: .bold))
                 .tracking(0.8)
                 .foregroundColor(Theme.textTertiary)
@@ -293,7 +371,7 @@ struct OutputsView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             if outputs.ltcDeckSlots.isEmpty {
-                Text("No hay reproductores visibles. Carga una pista para asignar salidas.")
+                Text(localization.t("ltc.no.players"))
                     .font(.system(size: 11))
                     .foregroundColor(Theme.textTertiary)
             } else {
@@ -392,8 +470,8 @@ struct OutputsView: View {
 
     private var mtcSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            sectionHeader(icon: "pianokeys", title: "MIDI Timecode (MTC)",
-                          subtitle: "Crea el puerto virtual MIDI 'STAGE CONNECT MTC' en el sistema. Cualquier DAW o software que acepte MTC externo puede suscribirse a él.")
+            sectionHeader(icon: "pianokeys", title: localization.t("mtc.title"),
+                          subtitle: localization.t("mtc.subtitle"))
 
             settingsPanel {
                 labelRow(label: "Frame rate") {
@@ -409,7 +487,7 @@ struct OutputsView: View {
                 }
             }
 
-            Text("El puerto aparece en Audio MIDI Setup -> Studio MIDI -> STAGE CONNECT MTC.")
+            Text(localization.t("mtc.port.hint"))
                 .font(.system(size: 10))
                 .foregroundColor(Theme.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -433,8 +511,8 @@ struct OutputsView: View {
 
     private var oscSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            sectionHeader(icon: "wifi", title: "OSC a Resolume",
-                          subtitle: "Envía tempo y compás a Resolume Arena/Avenue. En Resolume: Preferencias -> OSC -> Activar entrada.")
+            sectionHeader(icon: "wifi", title: localization.t("osc.title"),
+                          subtitle: localization.t("osc.subtitle"))
 
             settingsPanel {
                 labelRow(label: "Host") {
@@ -493,8 +571,8 @@ struct OutputsView: View {
 
     private var webSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            sectionHeader(icon: "globe", title: "Servidor web",
-                          subtitle: "Monitor en el navegador, JSON y WebSocket para un overlay propio (Resolume, OBS). No es un bot de Twitch.")
+            sectionHeader(icon: "globe", title: localization.t("web.title"),
+                          subtitle: localization.t("web.subtitle"))
 
             settingsPanel {
                 labelRow(label: "Puerto") {
@@ -544,25 +622,42 @@ struct OutputsView: View {
 
     private var obsSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            sectionHeader(icon: "video", title: "OBS Browser Source",
-                          subtitle: "Añade un Browser Source 1920×1080. El overlay pinta el TC y los decks. No es un bot de Twitch.")
+            sectionHeader(icon: "video", title: localization.t("obs.title.section"),
+                          subtitle: localization.t("obs.subtitle"))
 
             settingsPanel {
                 labelRow(label: "Fondo") {
-                    Toggle("Transparente", isOn: $outputs.obsTransparent)
+                    Toggle(localization.t("obs.transparent"), isOn: $outputs.obsTransparent)
+                        .id(localization.language)
                         .toggleStyle(.checkbox)
                         .font(.system(size: 11))
                 }
+                Divider().background(Theme.panelBorder)
+                Text(localization.t("obs.content"))
+                    .font(.system(size: 10, weight: .bold))
+                    .tracking(0.7)
+                    .foregroundColor(Theme.textTertiary)
+                Toggle(localization.t("obs.tc"), isOn: $outputs.obsShowTC)
+                    .toggleStyle(.checkbox).font(.system(size: 11))
+                Toggle(localization.t("obs.title"), isOn: $outputs.obsShowTitle)
+                    .toggleStyle(.checkbox).font(.system(size: 11))
+                Toggle(localization.t("obs.artwork"), isOn: $outputs.obsShowArtwork)
+                    .toggleStyle(.checkbox).font(.system(size: 11))
+                Toggle(localization.t("obs.meta"), isOn: $outputs.obsShowMeta)
+                    .toggleStyle(.checkbox).font(.system(size: 11))
+                Toggle(localization.t("obs.decks"), isOn: $outputs.obsShowDecks)
+                    .toggleStyle(.checkbox).font(.system(size: 11))
             }
+            .id(localization.language)
 
             if outputs.webEnabled {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("En este Mac")
+                    Text(localization.t("web.on.this.mac"))
                         .font(.system(size: 10, weight: .bold))
                         .tracking(0.7)
                         .foregroundColor(Theme.textTertiary)
                     urlCopyRow(outputs.obsURL(lan: false), hint: "URL local copiada")
-                    Text("En la red (otro equipo)")
+                    Text(localization.t("web.on.lan"))
                         .font(.system(size: 10, weight: .bold))
                         .tracking(0.7)
                         .foregroundColor(Theme.textTertiary)
@@ -574,7 +669,7 @@ struct OutputsView: View {
                     }
                 }
             } else {
-                Text("Activa el servidor web para obtener la URL. OBS: Browser Source, 1920×1080, FPS 30.")
+                Text(localization.t("obs.enable.web"))
                     .font(.system(size: 11))
                     .foregroundColor(Theme.textTertiary)
                 toggleButton(label: "Activar servidor web",
@@ -612,22 +707,45 @@ struct OutputsView: View {
             ForEach(outputs.ltcDevices) { dev in
                 let on = selected.contains(dev.id)
                 let owners = outputs.conflictOwners(for: dev.id, excluding: slot)
-                Button { toggle(dev.id) } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: on ? "checkmark.square.fill" : "square")
-                            .foregroundColor(on ? Theme.ledGreen : Theme.textTertiary)
-                        Text(dev.name)
-                            .font(.system(size: 11))
-                            .foregroundColor(Theme.textPrimary)
-                        if !owners.isEmpty {
-                            Text("también: \(owners.joined(separator: ", "))")
-                                .font(.system(size: 10))
-                                .foregroundColor(Theme.yellow)
+                VStack(alignment: .leading, spacing: 3) {
+                    Button { toggle(dev.id) } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: on ? "checkmark.square.fill" : "square")
+                                .foregroundColor(on ? Theme.ledGreen : Theme.textTertiary)
+                            Text(dev.name)
+                                .font(.system(size: 11))
+                                .foregroundColor(Theme.textPrimary)
+                            if !owners.isEmpty {
+                                Text("también: \(owners.joined(separator: ", "))")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(Theme.yellow)
+                            }
+                            Spacer()
                         }
-                        Spacer()
+                    }
+                    .buttonStyle(.plain)
+                    if on {
+                        HStack(spacing: 8) {
+                            Text("Vol")
+                                .font(.system(size: 10))
+                                .foregroundColor(Theme.textTertiary)
+                                .frame(width: 28, alignment: .leading)
+                            Slider(
+                                value: Binding(
+                                    get: { Double(outputs.levelForDevice(dev.id)) },
+                                    set: { outputs.setLevelForDevice(dev.id, level: Float($0)) }
+                                ),
+                                in: 0...1
+                            )
+                            .controlSize(.small)
+                            Text(String(format: "%.0f%%", outputs.levelForDevice(dev.id) * 100))
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundColor(Theme.textSecondary)
+                                .frame(width: 36, alignment: .trailing)
+                        }
+                        .padding(.leading, 22)
                     }
                 }
-                .buttonStyle(.plain)
             }
             if outputs.ltcDevices.isEmpty {
                 Text("No hay salidas de audio. Abre Audio MIDI Setup o pulsa actualizar.")
@@ -641,8 +759,8 @@ struct OutputsView: View {
 
     private var historySection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            sectionHeader(icon: "clock.arrow.circlepath", title: "Historial de reproducción",
-                          subtitle: "Se guarda solo cuando un deck en play cambia de título. JSON y TXT en la carpeta que elijas.")
+            sectionHeader(icon: "clock.arrow.circlepath", title: localization.t("history.title"),
+                          subtitle: localization.t("history.subtitle"))
 
             settingsPanel {
                 labelRow(label: "Auto-guardar") {
@@ -724,7 +842,7 @@ struct OutputsView: View {
                     Image(systemName: "music.note.list")
                         .font(.system(size: 28))
                         .foregroundColor(Theme.textTertiary)
-                    Text("El historial se llena automáticamente cuando suenan pistas.")
+                    Text(localization.t("history.empty"))
                         .font(.system(size: 11))
                         .foregroundColor(Theme.textTertiary)
                         .multilineTextAlignment(.center)
@@ -771,15 +889,15 @@ struct OutputsView: View {
 
     private var labelsSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            sectionHeader(icon: "tag", title: "Etiquetas de decks",
-                          subtitle: "Letra, número o nombre visible en la tira. Clic en la etiqueta de cada fila o edita aquí. Se guarda en este Mac.")
+            sectionHeader(icon: "tag", title: localization.t("labels.title"),
+                          subtitle: localization.t("labels.subtitle"))
 
             Button {
                 openWindow(id: "sc-monitor")
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "display")
-                    Text("Abrir MONITOR")
+                    Text(localization.t("labels.open.monitor"))
                         .font(.system(size: 12, weight: .bold))
                     Spacer()
                     Text("TC + decks  ·  F pantalla completa")
@@ -798,7 +916,7 @@ struct OutputsView: View {
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "list.bullet.rectangle")
-                    Text("Abrir SETLIST")
+                    Text(localization.t("labels.open.setlist"))
                         .font(.system(size: 12, weight: .bold))
                     Spacer()
                     Text("pegar / importar / historial")
@@ -814,7 +932,7 @@ struct OutputsView: View {
 
             settingsPanel {
                 if labels.sortedKeys.isEmpty {
-                    Text("Ninguna etiqueta personalizada. Clic en A/1 de una fila para cambiarla.")
+                    Text(localization.t("labels.empty"))
                         .font(.system(size: 11))
                         .foregroundColor(Theme.textTertiary)
                 } else {
@@ -873,8 +991,8 @@ struct OutputsView: View {
 
     private var mappingSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            sectionHeader(icon: "keyboard", title: "Mapeo",
-                          subtitle: "Teclado y MIDI se encienden o se apagan por separado. Off = no disparan. Note on o CC>64 = toggle. CC 0 = off. No se dispara al escribir en un campo.")
+            sectionHeader(icon: "keyboard", title: localization.t("mapping.title"),
+                          subtitle: localization.t("mapping.subtitle"))
 
             HStack(spacing: 8) {
                 mapMasterSwitch(title: "TECLADO", on: mapping.keyboardEnabled) {
@@ -891,7 +1009,7 @@ struct OutputsView: View {
                         get: { mapping.selectedSourceID },
                         set: { mapping.selectSource($0) }
                     )) {
-                        Text("Primer dispositivo").tag("")
+                        Text(localization.t("mapping.first.device")).tag("")
                         ForEach(mapping.sources) { src in
                             Text(src.name).tag(src.id)
                         }
@@ -935,7 +1053,7 @@ struct OutputsView: View {
                 .font(.system(size: 10))
                 .foregroundColor(Theme.textTertiary)
 
-            Text("F1–F4 son las primeras 4 filas visibles (SMPTE). LOCK/SMPTE van por id de fila, no por posición en CONFIG. Dual admite 8 filas (4 CDJ + 4 capas Denon).")
+            Text(localization.t("mapping.hint.dual"))
                 .font(.system(size: 10))
                 .foregroundColor(Theme.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1056,14 +1174,15 @@ struct OutputsView: View {
 
     private var languageSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            sectionHeader(icon: "globe", title: "IDIOMA",
-                          subtitle: "Selecciona el idioma de la interfaz.")
+            sectionHeader(icon: "globe", title: localization.t("language.title"),
+                          subtitle: localization.t("language.select"))
 
             settingsPanel {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(AppLanguage.allCases) { lang in
                         Button {
                             localization.language = lang
+                            localization.objectWillChange.send()
                         } label: {
                             HStack(spacing: 10) {
                                 Text(lang.flag)
@@ -1101,8 +1220,8 @@ struct OutputsView: View {
 
     private var appearanceSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            sectionHeader(icon: "circle.lefthalf.filled", title: "APARIENCIA",
-                          subtitle: "Cambia entre modo oscuro y claro.")
+            sectionHeader(icon: "circle.lefthalf.filled", title: localization.t("appearance.title"),
+                          subtitle: localization.t("appearance.subtitle"))
 
             settingsPanel {
                 labelRow(label: "Modo") {
@@ -1113,7 +1232,7 @@ struct OutputsView: View {
                             HStack(spacing: 6) {
                                 Image(systemName: "moon.fill")
                                     .font(.system(size: 11))
-                                Text("Oscuro")
+                                Text(localization.t("appearance.dark.short"))
                                     .font(.system(size: 11, weight: .medium))
                             }
                             .foregroundColor(theme.isDark ? .black : Theme.textSecondary)
@@ -1129,7 +1248,7 @@ struct OutputsView: View {
                             HStack(spacing: 6) {
                                 Image(systemName: "sun.max.fill")
                                     .font(.system(size: 11))
-                                Text("Claro")
+                                Text(localization.t("appearance.light.short"))
                                     .font(.system(size: 11, weight: .medium))
                             }
                             .foregroundColor(!theme.isDark ? .black : Theme.textSecondary)
@@ -1142,7 +1261,7 @@ struct OutputsView: View {
                 }
             }
 
-            Text("El modo claro adapta el fondo y el texto automaticamente. Los colores de acento, LED y waveform no cambian.")
+            Text(localization.t("appearance.hint"))
                 .font(.system(size: 10))
                 .foregroundColor(Theme.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1153,8 +1272,8 @@ struct OutputsView: View {
 
     private var updatesSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            sectionHeader(icon: "arrow.down.circle", title: "Actualizaciones",
-                          subtitle: "Consulta el servidor de licencias (:3000 / connectapp). Si hay un build mas nuevo, se descarga a Descargas y se abre el Finder.")
+            sectionHeader(icon: "arrow.down.circle", title: localization.t("updates.title"),
+                          subtitle: localization.t("updates.subtitle"))
 
             settingsPanel {
                 labelRow(label: "Version local") {
@@ -1179,7 +1298,7 @@ struct OutputsView: View {
                     if !remote.notes.isEmpty {
                         Divider().background(Theme.panelBorder)
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("Notas")
+                            Text(localization.t("updates.notes"))
                                 .font(.system(size: 11))
                                 .foregroundColor(Theme.textSecondary)
                             Text(remote.notes)
@@ -1226,7 +1345,7 @@ struct OutputsView: View {
                                     .font(.system(size: 11, weight: .bold, design: .monospaced))
                             } else {
                                 Image(systemName: "arrow.down.circle.fill")
-                                Text("ACTUALIZAR")
+                                Text(localization.t("updates.action"))
                                     .font(.system(size: 11, weight: .bold))
                                     .tracking(0.6)
                             }
@@ -1253,8 +1372,8 @@ struct OutputsView: View {
 
     private var licenseSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            sectionHeader(icon: "key.fill", title: "Licencia",
-                          subtitle: "Activa la app con una clave mensual o vitalicia. Puedes quitarla en cualquier momento; al hacerlo se pide de nuevo al abrir. Las claves no se muestran aquí.")
+            sectionHeader(icon: "key.fill", title: localization.t("license.title"),
+                          subtitle: localization.t("license.subtitle"))
 
             settingsPanel {
                 labelRow(label: "Estado") {
@@ -1269,7 +1388,7 @@ struct OutputsView: View {
                     license.deactivate()
                     presentation.wrappedValue.dismiss()
                 } label: {
-                    Text("QUITAR LICENCIA")
+                    Text(localization.t("license.remove"))
                         .font(.system(size: 11, weight: .bold))
                         .tracking(0.6)
                         .foregroundColor(Theme.red)

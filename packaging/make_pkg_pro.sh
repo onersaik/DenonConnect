@@ -265,7 +265,7 @@ cat > "$RES/Welcome.html" << 'HTML'
   <li><strong>STAGE CONNECT</strong> &mdash; Monitor principal (Denon + Pioneer)</li>
   <li><strong>STAGE CONNECT TEST</strong> &mdash; Simulador de reproductores para pruebas</li>
 </ul>
-<p class="sub">Versión 1.0 &nbsp;&bull;&nbsp; entikrecords.com &nbsp;&bull;&nbsp; macOS 13 o superior</p>
+<p class="sub">Versión 1.0 &nbsp;&bull;&nbsp; ENTIK MEDIA &nbsp;&bull;&nbsp; macOS 13 o superior</p>
 </body>
 </html>
 HTML
@@ -289,7 +289,7 @@ cat > "$RES/License.html" << 'HTML'
 <p>Lea detenidamente este acuerdo antes de instalar el software.</p>
 
 <h3>1. Concesión de licencia</h3>
-<p>entikrecords.com le concede una licencia personal, no exclusiva e intransferible para instalar y utilizar STAGE CONNECT en los dispositivos de su propiedad o bajo su control, de conformidad con este acuerdo.</p>
+<p>ENTIK MEDIA le concede una licencia personal, no exclusiva e intransferible para instalar y utilizar STAGE CONNECT en los dispositivos de su propiedad o bajo su control, de conformidad con este acuerdo.</p>
 
 <h3>2. Restricciones</h3>
 <p>Queda prohibido: redistribuir, vender, sublicenciar o alquilar el software; realizar ingeniería inversa o descompilar el código; eliminar avisos de propiedad intelectual; utilizarlo para fines ilegales.</p>
@@ -298,7 +298,7 @@ cat > "$RES/License.html" << 'HTML'
 <p>El software requiere una clave de activación válida para desbloquear todas las funciones. Las claves son personales e intransferibles.</p>
 
 <h3>4. Sin garantía</h3>
-<p>El software se proporciona "tal cual", sin garantía de ningún tipo, expresa o implícita. entikrecords.com no será responsable de daños derivados del uso o la imposibilidad de uso del software.</p>
+<p>El software se proporciona "tal cual", sin garantía de ningún tipo, expresa o implícita. ENTIK MEDIA no será responsable de daños derivados del uso o la imposibilidad de uso del software.</p>
 
 <h3>5. Actualizaciones</h3>
 <p>Las actualizaciones están sujetas a este mismo acuerdo salvo que se indique expresamente lo contrario.</p>
@@ -341,7 +341,7 @@ cat > "$RES/Conclusion.html" << 'HTML'
    <code>laif</code> &mdash; acceso de por vida</p>
 <p class="note">
   Asegurate de que tus reproductores y el Mac estan en la misma red local.<br>
-  Para soporte: entikrecords.com
+  Para soporte: ENTIK MEDIA
 </p>
 </body>
 </html>
@@ -409,7 +409,7 @@ cp "$FINAL_PKG" "$DMG_SCRATCH/"
 cat > "$DMG_SCRATCH/LEEME.txt" << TXT
 STAGE CONNECT ${VERSION}
 ========================
-entikrecords.com
+ENTIK MEDIA
 
 Instalacion rapida
 ------------------

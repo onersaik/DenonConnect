@@ -232,7 +232,7 @@ public final class ProDJLinkManager: ObservableObject {
         log("Pro DJ Link: recuperación rápida — \(reason)")
         bookkeepingQueue.sync {
             lateHandshakePending = true
-            announceBurstUntil = Date().addingTimeInterval(4)
+            announceBurstUntil = Date().addingTimeInterval(6)
         }
     }
 
@@ -638,7 +638,7 @@ public final class ProDJLinkManager: ObservableObject {
             }
 
             let burst = bookkeepingQueue.sync { Date() < announceBurstUntil }
-            Thread.sleep(forTimeInterval: burst ? 0.2 : 1.5)
+            Thread.sleep(forTimeInterval: burst ? 0.12 : 1.2)
         }
         sock.close()
     }

@@ -25,13 +25,13 @@ final class LicenseStore: ObservableObject {
     @Published var lastError: String = ""
 
     // ── Configuracion ───────────────────────────────────────────────────────
-    // Keel = app.entikmedia.com. connectapp = NXDOMAIN hasta DNS Cloudflare.
-    // Orden: Express local (cabina) → connectapp (prod cuando resuelva).
+    // Prod = app.entikmedia.com (gestor de licencias detrás del túnel).
+    // Orden: Express local (cabina) → app.entikmedia.com.
     // Nunca embeber trycloudflare: hostname efímero.
     // attemptServer: NXDOMAIN / 5xx / unknown / invalid (no-local) → siguiente base.
     private static let serverBases = [
         "http://127.0.0.1:3000",
-        "https://connectapp.entikmedia.com",
+        "https://app.entikmedia.com",
     ]
     private static let masterCode = "KEEPTHEFAITH"
     /// Claves de cabina (instalador). Offline, sin servidor. No son un bypass nuevo.
@@ -106,7 +106,7 @@ final class LicenseStore: ObservableObject {
         expiresAt = end
         if let end, Date() >= end {
             // Cabina: una licencia ya validada no se borra ni se apaga
-            // porque el mes acabó y connectapp.entikmedia.com no responde.
+            // porque el mes acabó y app.entikmedia.com no responde.
             isUnlocked = true
             lastError = "Licencia caducada. Sigue en cabina local. Renueva cuando haya red."
             return
@@ -215,7 +215,7 @@ final class LicenseStore: ObservableObject {
               let code = defaults.string(forKey: kCode) else { return }
 
         // Claves de instalador / cabina: no viven en el servidor. Un /api/verify
-        // "unknown" no debe tumbar el directo cuando connectapp vuelva online.
+        // "unknown" no debe tumbar el directo cuando app.entikmedia.com vuelva online.
         let lower = code.lowercased()
         if lower == Self.monthlyCode || lower == Self.lifetimeCode { return }
 
@@ -333,7 +333,7 @@ final class LicenseStore: ObservableObject {
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("STAGE CONNECT/\(Self.appVersion) (macOS)", forHTTPHeaderField: "User-Agent")
-        // connectapp NXDOMAIN: fallback rápido a Express local (:3000).
+        // app.entikmedia.com lento/caído: fallback rápido a Express local (:3000).
         req.timeoutInterval = base.contains("127.0.0.1") ? 3 : 2
 
         let cuerpo: [String: Any] = [
@@ -385,7 +385,7 @@ final class LicenseStore: ObservableObject {
             }
 
             // unknown / invalid genérico en un base remoto: probar el siguiente
-            // (p.ej. connectapp → :3000 si :3000 está detrás; o :3000 → connectapp).
+            // (p.ej. app.entikmedia.com → :3000 local, o al revés).
             let st = res.status ?? ""
             if !rest.isEmpty, st == "unknown" || (st == "invalid" && !base.contains("127.0.0.1")) {
                 self.attemptServer(bases: rest, path: path, code: code, completion: completion)

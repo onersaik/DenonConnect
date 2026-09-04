@@ -8,6 +8,7 @@ import StageLinqKit
 
 @main
 struct SC6000ConnectApp: App {
+    @NSApplicationDelegateAdaptor(AppQuitDelegate.self) private var appDelegate
     @StateObject private var manager    = StageLinqManager()
     @StateObject private var proDJLink  = ProDJLinkManager()
     @StateObject private var outputs    = OutputController()
@@ -53,8 +54,9 @@ struct SC6000ConnectApp: App {
                 .frame(minWidth: 980, minHeight: 640)
                 .preferredColorScheme(theme.isDark ? .dark : .light)
                 .onAppear {
+                    appDelegate.stopHandler = { [self] in stopServices(forQuit: true) }
                     license.refresh()
-                    // LAN siempre: Dual/SMPTE/descubrimiento no esperan a connectapp.entikmedia.com.
+                    // LAN siempre: Dual/SMPTE/descubrimiento no esperan a app.entikmedia.com.
                     startServices()
                     // Latido opcional: sin red / NXDOMAIN no toca la cabina (ver LicenseStore).
                     license.verifyInBackground()
@@ -70,7 +72,7 @@ struct SC6000ConnectApp: App {
                 .onReceive(NotificationCenter.default.publisher(
                     for: NSApplication.willTerminateNotification
                 )) { _ in
-                    stopServices()
+                    stopServices(forQuit: true)
                 }
         }
         .windowStyle(.hiddenTitleBar)
@@ -133,12 +135,13 @@ struct SC6000ConnectApp: App {
         proDJLink.kickNetworkRecovery(reason: "arranque")
     }
 
-    private func stopServices() {
+    private func stopServices(forQuit: Bool = false) {
         guard servicesStarted else { return }
         servicesStarted = false
         networkRecovery.stop()
-        mapping.stop()
-        outputs.shutdown()
+        // En quit: no dispose CoreMIDI (MIDIClientDispose cuelga willTerminate).
+        mapping.stop(forProcessExit: forQuit)
+        outputs.shutdown(forProcessExit: forQuit)
         software.stop()
         manager.stop()
         proDJLink.stop()
@@ -181,5 +184,50 @@ struct SC6000ConnectApp: App {
         }
         instanceLockFD = fd
         return true
+    }
+}
+
+/// Sale sin bloquear en AVAudioEngine / CoreMIDI (el hang clasico al cerrar).
+///
+/// `stopServices()` toca varios subsistemas (StageLinq, Pro DJ Link, CoreMIDI,
+/// AVAudioEngine...) que internamente usan `queue.sync{}` entre el hilo
+/// principal y colas de fondo. Si cualquiera de ellos se queda bloqueado,
+/// llamarlo de forma sincrona aqui congela el hilo principal y macOS muestra
+/// "la aplicacion no responde" (beachball) obligando a forzar el cierre.
+///
+/// Por eso el apagado se lanza en una cola de fondo y el hilo principal solo
+/// espera con un limite de tiempo (watchdog). Si el apagado no termina a
+/// tiempo, salimos igualmente: el usuario nunca debe ver un cierre colgado.
+final class AppQuitDelegate: NSObject, NSApplicationDelegate {
+    var stopHandler: (() -> Void)?
+    private var didStop = false
+    private let stopLock = NSLock()
+    private static let shutdownTimeout: TimeInterval = 2.5
+
+    private func runStopOnceBounded() {
+        stopLock.lock()
+        if didStop { stopLock.unlock(); return }
+        didStop = true
+        stopLock.unlock()
+
+        guard let handler = stopHandler else { return }
+
+        let sema = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .userInitiated).async {
+            handler()
+            sema.signal()
+        }
+        // No bloqueamos el hilo principal indefinidamente: si algun subsistema
+        // se cuelga, seguimos adelante con el cierre pasado el limite.
+        _ = sema.wait(timeout: .now() + Self.shutdownTimeout)
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        runStopOnceBounded()
+        return .terminateNow
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        runStopOnceBounded()
     }
 }

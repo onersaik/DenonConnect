@@ -7,7 +7,7 @@ import AppKit
 import StageLinqKit
 
 enum AppMode: String, CaseIterable, Identifiable {
-    case dual = "Dual"
+    /// Cabina multi-fuente según ticks de CONFIG (antes Dual+Auto).
     case auto = "Auto"
     case denon = "Denon"
     case pioneer = "Pioneer"
@@ -19,13 +19,13 @@ enum AppMode: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    /// Dual = hasta 4 CDJ + capas Denon. Todos = también software / export.
-    var showsDenon: Bool { self == .denon || self == .dual || self == .todos }
-    var showsPioneer: Bool { self == .pioneer || self == .dual || self == .todos }
-    var showsSerato: Bool { self == .serato || self == .todos }
-    var showsVDJ: Bool { self == .virtualdj || self == .todos }
-    var showsRekordbox: Bool { self == .rekordbox || self == .todos }
-    var showsTraktor: Bool { self == .traktor || self == .todos }
+    /// Modos exclusivos (solo esa familia). Auto/Todos usan los ticks de CONFIG.
+    var isExclusiveSource: Bool {
+        switch self {
+        case .denon, .pioneer, .serato, .virtualdj, .rekordbox, .traktor: return true
+        case .auto, .todos: return false
+        }
+    }
 }
 
 enum DeckLayout { case large, small, master }
@@ -62,25 +62,54 @@ struct ContentView: View {
         nonmutating set { mapping.showOutputs = newValue }
     }
 
-    /// En modo Auto elegimos según lo que haya realmente con pista, no por
-    /// dispositivos vacíos (simulador Denon ON sin audio, CDJ virtual, etc.).
+    /// Auto: ticks de CONFIG. Todos: todas las fuentes. Exclusivos: solo esa familia.
+    /// Dual se migró a Auto (misma lógica multi-fuente).
     private var effectiveMode: AppMode {
-        guard mode == .auto else { return mode }
-        let denon = denonLoadedCount > 0
-        let pioneer = pioneerFamilyCount > 0
-        let serato = software.seratoLiveCount > 0
-        let vdj = software.vdjLiveCount > 0
-        let rekordbox = rekordboxLiveCount > 0
-        let families = [denon, pioneer, serato, vdj, rekordbox].filter { $0 }.count
-        if families > 1 {
-            return (serato || vdj || rekordbox) ? .todos : .dual
+        if mode == .auto || mode == .todos { return mode }
+        return mode
+    }
+
+    private var showDenon: Bool {
+        switch mode {
+        case .denon: return true
+        case .pioneer, .serato, .virtualdj, .rekordbox, .traktor: return false
+        case .auto, .todos: return mapping.sourceDenon
         }
-        if serato { return .serato }
-        if vdj { return .virtualdj }
-        if rekordbox { return .rekordbox }
-        if pioneer { return .pioneer }
-        if denon { return .denon }
-        return .dual
+    }
+    private var showPioneer: Bool {
+        switch mode {
+        case .pioneer: return true
+        case .denon, .serato, .virtualdj, .rekordbox, .traktor: return false
+        case .auto, .todos: return mapping.sourcePioneer
+        }
+    }
+    private var showSerato: Bool {
+        switch mode {
+        case .serato: return true
+        case .denon, .pioneer, .virtualdj, .rekordbox, .traktor: return false
+        case .auto, .todos: return mapping.sourceSerato
+        }
+    }
+    private var showVDJ: Bool {
+        switch mode {
+        case .virtualdj: return true
+        case .denon, .pioneer, .serato, .rekordbox, .traktor: return false
+        case .auto, .todos: return mapping.sourceVDJ
+        }
+    }
+    private var showRekordbox: Bool {
+        switch mode {
+        case .rekordbox: return true
+        case .denon, .pioneer, .serato, .virtualdj, .traktor: return false
+        case .auto, .todos: return mapping.sourceRekordbox
+        }
+    }
+    private var showTraktor: Bool {
+        switch mode {
+        case .traktor: return true
+        case .denon, .pioneer, .serato, .virtualdj, .rekordbox: return false
+        case .auto, .todos: return mapping.sourceTraktor
+        }
     }
 
     /// Export rekordbox en Pro DJ Link (no CDJ hardware). Sin fingir pistas.
@@ -109,20 +138,20 @@ struct ContentView: View {
         return n
     }
 
-    /// Todas las filas Pioneer con pista (Auto / conteo de familia).
+    /// Filas Pioneer con pista (conteo cabecera).
     private var pioneerFamilyCount: Int {
         (shouldShowTestPioneer ? 1 : 0) + lanPioneerWithTrack.count
     }
 
-    /// Lo que Dual pinta: tope 4 CDJ de LAN. TEST solo si quedan huecos.
+    /// Auto: tope 4 CDJ de LAN. Exclusivo Pioneer: todos los de LAN.
     private var pioneerRowCount: Int {
-        if effectiveMode == .dual {
+        if mode == .auto || mode == .todos {
             return (shouldShowTestPioneer ? 1 : 0) + dualPioneerLAN.count
         }
         return pioneerFamilyCount
     }
 
-    /// CDJ/XDJ de LAN. El export rekordbox va al modo rekordbox, no a Dual/Pioneer.
+    /// CDJ/XDJ de LAN. El export rekordbox va al modo rekordbox.
     private var lanPioneerWithTrack: [ProDJLinkDevice] {
         proDJLink.devices.filter { $0.isLANPlayerWithTrack && !$0.isRekordboxExport }
             .sorted { $0.playerNumber < $1.playerNumber }
@@ -132,16 +161,13 @@ struct ContentView: View {
         Array(lanPioneerWithTrack.prefix(4))
     }
 
-    /// Pioneer TEST no necesita un CDJ descubierto por UDP: el título, BPM,
-    /// waveform y playhead van por TestLink. Si Denon TEST ya muestra esa
-    /// pista, Auto/Dual no la clonan; el modo Pioneer sí la enseña.
-    /// Dual: tope 4 CDJ — TEST no empuja un 5.º si ya hay 4 de LAN.
+    /// Pioneer TEST: modo Pioneer siempre; Auto si quedan huecos (<4 LAN).
     private var shouldShowTestPioneer: Bool {
         guard testLink.roster.hasPioneerTrack else { return false }
         if mode == .pioneer { return true }
         if mode == .denon { return false }
         if testLink.roster.denonOn { return false }
-        if mode == .dual || mode == .auto {
+        if mode == .auto || mode == .todos {
             return lanPioneerWithTrack.count < 4
         }
         return true
@@ -165,11 +191,12 @@ struct ContentView: View {
         let _ = testLink.rosterTick
         let _ = software.rosterTick
         var rows: [DeckEntry] = []
-        let showDenon = effectiveMode.showsDenon
-        let showPioneer = effectiveMode.showsPioneer
-        let showSerato = effectiveMode.showsSerato
-        let showVDJ = effectiveMode.showsVDJ
-        let showRekordbox = effectiveMode.showsRekordbox
+        let _ = mapping.sourceDenon
+        let _ = mapping.sourcePioneer
+        let _ = mapping.sourceSerato
+        let _ = mapping.sourceVDJ
+        let _ = mapping.sourceRekordbox
+        let _ = mapping.sourceTraktor
 
         if showDenon {
             if testLink.roster.denonOn {
@@ -207,7 +234,7 @@ struct ContentView: View {
             if shouldShowTestPioneer {
                 rows.append(.pioneerTest)
             }
-            let lan = effectiveMode == .dual ? dualPioneerLAN : lanPioneerWithTrack
+            let lan = (mode == .auto || mode == .todos) ? dualPioneerLAN : lanPioneerWithTrack
             for device in lan {
                 rows.append(.pioneer(device: device))
             }
@@ -227,7 +254,7 @@ struct ContentView: View {
                 rows.append(.pioneer(device: device))
             }
         }
-        // Traktor: modo filtro + presencia local. Sin protocolo de pista → sin filas inventadas.
+        // Traktor: filtro activo + presencia local. Sin protocolo de pista → sin filas inventadas.
         return rows
     }
 
@@ -322,21 +349,19 @@ struct ContentView: View {
         }
     }
 
-    /// MASTER grande + mosaico 2 col (Dual 4+4). Pista entera por celda. Scrolleable.
+    /// MASTER grande + mosaico del resto (sin duplicar el hero). Scrolleable.
     private var compactMasterStack: some View {
         GeometryReader { geo in
-            let twoCol = geo.size.width >= 720 && entries.count > 1
+            let others = entries.filter { !isCompactFocus($0) }
+            let twoCol = geo.size.width >= 720 && others.count > 1
             ScrollView {
                 VStack(spacing: 0) {
                     compactHeroRow
-                    if entries.count > 1 {
+                    if !others.isEmpty {
                         Rectangle().fill(Theme.rowDivider).frame(height: 2)
                         LazyVGrid(columns: twoCol ? overviewTwoCol : overviewOneCol, spacing: 0) {
-                            ForEach(entries) { entry in
+                            ForEach(others) { entry in
                                 deckRow(entry, isLarge: false, isHero: false)
-                                    .overlay(alignment: .leading) {
-                                        compactFocusBar(entry)
-                                    }
                             }
                         }
                     }
@@ -466,10 +491,14 @@ struct ContentView: View {
         // Force refresh Theme.* when day/night flips (static colors read isDarkGlobal).
         FlowLayout(spacing: 8, lineSpacing: 6, trailingFrom: 1) {
             VStack(alignment: .leading, spacing: 1) {
-                Text("STAGE CONNECT")
+                HStack(spacing: 0) {
+                    Text("STAGE")
+                        .foregroundColor(Theme.textPrimary)
+                    Text("CONNECT")
+                        .foregroundColor(Theme.accent)
+                }
                     .font(.system(size: 13, weight: .bold))
                     .tracking(1.6)
-                    .foregroundColor(Theme.textPrimary)
                     .noClip()
                     .id(theme.isDark) // invalida Theme.* al cambiar día/noche
                 HStack(spacing: 10) {
@@ -492,11 +521,12 @@ struct ContentView: View {
             .fixedSize()
 
             HStack(spacing: 1) {
-                stageViewButton("CDJ", mode: .large, help: "Aguja al centro, zoom de pista. Show / booth. Atajo: G")
-                stageViewButton("Overview", mode: .small, help: "Pista entera por fila. El MASTER de arriba sí hace zoom. Atajo: P")
-                stageViewButton("Master", mode: .master, help: "Solo el reproductor que manda el MASTER. Atajo: V")
+                stageViewButton(localization.t("view.cdj"), mode: .large, help: "Aguja al centro, zoom de pista. Show / booth. Atajo: G")
+                stageViewButton(localization.t("view.overview"), mode: .small, help: "Pista entera por fila. El MASTER de arriba sí hace zoom. Atajo: P")
+                stageViewButton(localization.t("view.master"), mode: .master, help: "Solo el reproductor que manda el MASTER. Atajo: V")
             }
             .fixedSize()
+            .id(localization.language)
 
             waveformZoomChip
                 .fixedSize()
@@ -531,12 +561,12 @@ struct ContentView: View {
                         .frame(width: 7, height: 7)
                         .shadow(color: outputs.ltcEnabled ? Theme.ledGreen.opacity(0.9) : .clear, radius: 3)
                     VStack(alignment: .leading, spacing: 0) {
-                        Text("MASTER")
+                        Text(localization.t("header.master"))
                             .font(.system(size: 9, weight: .bold))
                             .tracking(0.7)
                             .noClip()
                         if outputs.ltcEnabled {
-                            Text(outputs.ltcAutoFollow ? "AUTO" : "PIN")
+                            Text(outputs.ltcAutoFollow ? localization.t("header.master.auto") : localization.t("header.master.pin"))
                                 .font(.system(size: 7, weight: .bold))
                                 .tracking(0.4)
                                 .opacity(0.75)
@@ -554,15 +584,15 @@ struct ContentView: View {
             .help("MASTER de casa: un LTC que sigue al deck master, On Air o el que suena. LOCK en una fila con salida propia no se pisa. Atajo: M")
 
             headerMapToggle(
-                title: "KEY",
+                title: localization.t("header.key"),
                 on: mapping.keyboardEnabled,
                 help: mapping.keyboardEnabled
-                    ? "Teclado ON: 1–5 Dual/Auto/Denon/Pioneer/Todos, G P V M, +/− zoom, F1–F4 = SMPTE de las primeras 4 filas. Pulsa para apagar."
+                    ? "Teclado ON: 1–4 Auto/Denon/Pioneer/Todos, G P V M, +/− zoom, F1–F4 = SMPTE. Pulsa para apagar."
                     : "Teclado OFF: las teclas no disparan acciones. Pulsa para activar."
             ) { mapping.keyboardEnabled.toggle() }
 
             headerMapToggle(
-                title: "MIDI",
+                title: localization.t("header.midi"),
                 on: mapping.midiEnabled,
                 help: mapping.midiEnabled
                     ? "MIDI ON: usa el puerto elegido en CONFIG. Pulsa para ignorar CC y notas."
@@ -575,7 +605,7 @@ struct ContentView: View {
                 HStack(spacing: 4) {
                     Image(systemName: "display")
                         .font(.system(size: 10))
-                    Text("MONITOR")
+                    Text(localization.t("header.monitor"))
                         .font(.system(size: 9, weight: .bold))
                         .tracking(0.6)
                         .noClip()
@@ -588,6 +618,7 @@ struct ContentView: View {
             .buttonStyle(.plain)
             .fixedSize()
             .help("Ventana MONITOR: Solo TC, Solo datos, pantalla completa (F).")
+            .id(localization.language)
 
             Button {
                 openWindow(id: "sc-tracklist")
@@ -595,7 +626,7 @@ struct ContentView: View {
                 HStack(spacing: 4) {
                     Image(systemName: "list.bullet.rectangle")
                         .font(.system(size: 10))
-                    Text("SETLIST")
+                    Text(localization.t("header.setlist"))
                         .font(.system(size: 9, weight: .bold))
                         .tracking(0.6)
                         .noClip()
@@ -615,7 +646,7 @@ struct ContentView: View {
                 HStack(spacing: 4) {
                     Image(systemName: "gearshape")
                         .font(.system(size: 10))
-                    Text("CONFIG")
+                    Text(localization.t("header.config"))
                         .font(.system(size: 9, weight: .bold))
                         .tracking(0.6)
                         .noClip()
@@ -706,11 +737,12 @@ struct ContentView: View {
 
     private var waveformZoomChip: some View {
         HStack(spacing: 4) {
-            Text("ZOOM")
+            Text(localization.t("header.zoom"))
                 .font(.system(size: 8, weight: .bold))
                 .tracking(0.5)
                 .foregroundColor(Theme.textTertiary)
                 .noClip()
+                .id(localization.language)
             Button {
                 mapping.waveformWindowSeconds = WaveformZoom.zoomOut(mapping.waveformWindowSeconds)
             } label: {
@@ -776,18 +808,19 @@ private struct SourceCount: View {
 
 private struct EmptyStateView: View {
     let mode: AppMode
+    @EnvironmentObject var localization: LocalizationStore
 
     var body: some View {
         VStack(spacing: 12) {
             Image(systemName: "dot.radiowaves.left.and.right")
                 .font(.system(size: 38))
                 .foregroundColor(Theme.textTertiary)
-            Text("Buscando reproductores en la red…")
+            Text(localization.t("empty.searching"))
                 .font(.system(size: 14, weight: .medium))
                 .foregroundColor(Theme.textSecondary)
+                .id(localization.language)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // mode reservado: mismo copy en Dual/Denon/Pioneer/software.
         .accessibilityLabel(mode.rawValue)
     }
 }
@@ -1204,6 +1237,7 @@ enum DeckDisplayBuilder {
             peaksHigh: overlay?.peaksHigh ?? []
         )
         display.extraCueFractions = overlay?.cueFractions ?? []
+        display.loopEnabled = overlay?.loopInFraction != nil
         display.signalAt = overlay != nil ? Date() : .distantPast
         display.controlStamp = controlStamp(
             playing: playing,
@@ -1257,6 +1291,7 @@ enum DeckDisplayBuilder {
             peaksHigh: overlay?.peaksHigh ?? []
         )
         display.extraCueFractions = overlay?.cueFractions ?? []
+        display.loopEnabled = overlay?.loopInFraction != nil
         display.signalAt = overlay != nil ? Date() : .distantPast
         display.controlStamp = controlStamp(
             playing: playing,
@@ -1351,6 +1386,9 @@ enum DeckDisplayBuilder {
             peaksHigh: overlay?.peaksHigh ?? deck.peaksHigh
         )
         display.extraCueFractions = overlay?.cueFractions ?? []
+        display.loopEnabled = overlay?.loopInFraction != nil || deck.loopEnabled
+        display.loopSizeBeats = deck.loopSizeBeats
+        display.activeQuickLoops = deck.quickLoops.enumerated().compactMap { $0.element ? $0.offset + 1 : nil }
         display.signalAt = overlay != nil ? Date() : deck.lastPacketAt
         _ = deck.activityTick
         display.controlStamp = controlStamp(
@@ -1453,6 +1491,8 @@ enum DeckDisplayBuilder {
         if overlay != nil {
             display.extraCueFractions = overlay?.cueFractions ?? []
         }
+        display.loopEnabled = overlay?.loopInFraction != nil
+            || device.playModeLabel.lowercased().contains("loop")
         display.controlStamp = controlStamp(
             playing: playing,
             master: overlay?.isMaster ?? (device.trackLoaded && device.isMaster),

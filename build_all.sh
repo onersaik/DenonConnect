@@ -114,7 +114,7 @@ ol{margin:10px 0 0 18px;padding:0} li{margin-bottom:8px}
 <li>En CONFIG asigna las salidas de LTC, MTC y OSC.</li>
 <li>Pulsa MASTER y el timecode empieza a seguir lo que suena.</li>
 </ol>
-<p class="n">entikrecords.com</p>
+<p class="n">ENTIK MEDIA</p>
 </body></html>
 HTML
 
@@ -185,7 +185,7 @@ El Mac y los reproductores en la misma red local.
 STAGE CONNECT TEST.app simula reproductores en la red para que
 puedas probar la configuracion sin tener el equipo delante.
 
-entikrecords.com
+ENTIK MEDIA
 TXT
 
 DMG_OUT="$DEST/STAGE CONNECT $VERSION.dmg"

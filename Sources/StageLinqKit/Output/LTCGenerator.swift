@@ -72,8 +72,26 @@ public final class LTCGenerator {
     /// tape vari-speed cuando el DJ cambia el pitch — no solo la cifra en
     /// pantalla, tambien el audio SMPTE que sale hacia luces/video externos.
     private var playbackRate:       Double = 1.0
+    /// Sesgo continuo de velocidad (tipo genlock) para que la posición del
+    /// generador converja hacia el playhead real sin necesitar un hard-reset
+    /// audible. Sin esto, un desfase por debajo del umbral de hard-reset
+    /// (6 frames) nunca se corregía: el LTC podía quedar sistemáticamente
+    /// varios frames por detrás del playhead real, inservible para
+    /// sincronizar vídeo/efectos externos aunque el tono "sonara" a la
+    /// velocidad correcta.
+    private var rateBias:           Double = 0
     private var rateRefWallClock:   Double = 0
     private var rateRefSeconds:     Double = 0
+    /// El pitch/rateHint del protocolo (StageLinq /Speed, Pro DJ Link %
+    /// pitch) es siempre una MAGNITUD hacia adelante, nunca lleva signo de
+    /// dirección. Un scratch/backspin real solo se ve en la propia posición
+    /// retrocediendo tick a tick, así que la dirección real se detecta por
+    /// diferencia de posición, con un pequeño debounce para no disparar en
+    /// falso con el "diente de sierra" normal de la interpolación entre
+    /// paquetes de red.
+    private var reverseStreak:      Int    = 0
+    private var forwardStreak:      Int    = 0
+    private var inReverse:          Bool   = false
     private var bitsOfFrame:        [UInt8] = []
     private var bitIndex:           Int    = 0
     private var halfBitPhase:       Int    = 0
@@ -201,12 +219,44 @@ public final class LTCGenerator {
         let pausedSeek = !nowPlaying && delta != 0
         let hardReset = force || bitsOfFrame.isEmpty || playStateChanged
             || pausedSeek || abs(delta) > 6
+        // Dirección real (adelante/atrás): el pitch/rateHint del protocolo
+        // (StageLinq /Speed, Pro DJ Link % pitch) es siempre una magnitud,
+        // nunca lleva signo — un scratch/backspin real es invisible para el
+        // pitch y solo se ve en la propia posición retrocediendo tick a
+        // tick. Se mide SIEMPRE (no solo cuando no hay rateHint) y con un
+        // pequeño debounce de 2 lecturas seguidas, para no disparar en falso
+        // con el "diente de sierra" normal de la interpolación entre
+        // paquetes de red.
+        var measuredRate: Double? = nil
+        if !hardReset, nowPlaying, rateRefWallClock > 0 {
+            let dtWall = now - rateRefWallClock
+            let dtSeconds = safe - rateRefSeconds
+            if dtWall > 0.004, abs(dtSeconds) > 0.0002 {
+                let m = dtSeconds / dtWall
+                if m.isFinite { measuredRate = min(4.0, max(-4.0, m)) }
+            }
+        }
+        if let m = measuredRate, m < -0.04 {
+            reverseStreak += 1; forwardStreak = 0
+        } else if measuredRate != nil {
+            forwardStreak += 1; reverseStreak = 0
+        }
+        if inReverse {
+            if forwardStreak >= 2 { inReverse = false }
+        } else if reverseStreak >= 2 {
+            inReverse = true
+        }
+        rateRefWallClock = now
+        rateRefSeconds = safe
+
         if hardReset {
             playheadSeconds = safe
             currentFrame = max(0, frame)
             loadFrameBitsLocked()
             rateRefWallClock = now
             rateRefSeconds = safe
+            rateBias = 0
+            reverseStreak = 0; forwardStreak = 0; inReverse = false
             if rateHint == nil { playbackRate = 1.0 }
         }
         // Velocidad del tono LTC: el protocolo manda el pitch/vari-speed
@@ -216,22 +266,65 @@ public final class LTCGenerator {
         // saltos audibles de velocidad. Se suaviza igual que la estimación
         // por diferencia, para que un cambio real de pitch se note enseguida
         // pero un jitter de 1 frame no.
-        let smoothing = 0.82
-        if let hint = rateHint, hint.isFinite, hint > 0 {
-            let clamped = min(4.0, max(-4.0, hint))
-            playbackRate = playbackRate * smoothing + clamped * (1 - smoothing)
-        } else if nowPlaying, !hardReset {
-            let dtWall = now - rateRefWallClock
-            let dtSeconds = safe - rateRefSeconds
-            if rateRefWallClock > 0, dtWall >= 0.05, abs(dtSeconds) > 0.0004 {
-                let measured = dtSeconds / dtWall
-                if measured.isFinite {
-                    let clamped = min(4.0, max(-4.0, measured))
-                    playbackRate = playbackRate * smoothing + clamped * (1 - smoothing)
-                }
-                rateRefWallClock = now
-                rateRefSeconds = safe
+        let smoothing = 0.35
+        func applyRate(_ target: Double) {
+            if abs(target - playbackRate) > 0.06 {
+                playbackRate = target
+            } else {
+                playbackRate = playbackRate * smoothing + target * (1 - smoothing)
             }
+        }
+        if inReverse, let measured = measuredRate {
+            // Marcha atrás real confirmada: manda la posición, no el pitch
+            // (que no tiene signo de dirección). El LTC tiene que sonar y
+            // contar hacia atrás en vivo, igual que una cinta rebobinando a
+            // mano — no congelarse hasta que el DJ retome hacia adelante.
+            applyRate(measured)
+        } else if let hint = rateHint, hint.isFinite, hint > 0 {
+            var clamped = min(4.0, max(0.05, hint))
+            // Pitch a 0: el StateMap/Pro DJ Link puede devolver 0.998, 1.003…
+            // por ruido de coma flotante. Sin este snap el LTC nunca sonaba
+            // ni corría a exactamente 1.0x aunque el DJ no hubiera tocado el
+            // pitch — se clava al valor exacto dentro de una tolerancia muy
+            // por debajo del paso mínimo real de cualquier fader de pitch.
+            if abs(clamped - 1.0) < 0.0015 { clamped = 1.0 }
+            applyRate(clamped)
+        } else if let measured = measuredRate {
+            applyRate(measured)
+        }
+        // Genlock de posición: si no es un hard-reset, cualquier desfase
+        // residual entre el playhead real y el del generador se corrige de
+        // forma continua sesgando muy levemente la velocidad de reproducción
+        // del tono, en vez de esperar a que el desfase cruce el umbral de
+        // hard-reset (lo que dejaba el LTC "flotando" varios frames por
+        // detrás — inválido para sincronizar vídeo/efectos).
+        //
+        // Importante: esto NO es lo que fija la velocidad del tono (eso ya
+        // lo hace `playbackRate` arriba, a partir del pitch real). El sesgo
+        // aquí es solo un ajuste fino de deriva y tiene que ser mucho más
+        // pequeño y lento que cualquier cambio real de pitch — si no, en el
+        // instante en que el pitch cambia de golpe (el DJ mueve el fader),
+        // el error de posición se dispara momentáneamente porque el
+        // generador aún no ha "puesto al día" su posición a la nueva
+        // velocidad, y una corrección agresiva se suma ENCIMA del salto de
+        // velocidad ya correcto — el resultado es que suena a una velocidad
+        // que no es ni la vieja ni la nueva. Con una ganancia pequeña ese
+        // pico transitorio es inaudible y solo la deriva lenta y sostenida
+        // (jitter de red, redondeo) se corrige, a lo largo de ~2 s.
+        if hardReset {
+            rateBias = 0
+        } else if nowPlaying {
+            let frameSeconds = 1.0 / (frameRate.rawValue > 0 ? frameRate.rawValue : 25)
+            let posError = safe - playheadSeconds
+            let timeConstant = 2.0
+            let maxBias = 0.03
+            if abs(posError) > frameSeconds * 0.5 {
+                rateBias = min(maxBias, max(-maxBias, posError / timeConstant))
+            } else {
+                rateBias = 0
+            }
+        } else {
+            rateBias = 0
         }
         stateLock.unlock()
     }
@@ -295,9 +388,19 @@ public final class LTCGenerator {
         log("SMPTE LTC [\(name)] en marcha — \(Int(frameRate.rawValue)) fps, \(Int(rate)) Hz, \(deviceDesc)")
     }
 
+    /// Cambia la amplitud en caliente (0…1). Seguro desde el hilo de UI.
+    public func setLevel(_ value: Float) {
+        let clamped = max(0, min(1, value))
+        stateLock.lock()
+        level = clamped
+        stateLock.unlock()
+    }
+
     /// Corta el engine, el AU y el render. No deja silencio a 00:00:00:00:
     /// deja de emitir por completo.
-    public func stop() {
+    /// - Parameter forProcessExit: en el quit de la app no toca AVAudioEngine
+    ///   (stop/reset en `willTerminate` cuelga el proceso y obliga a forzar salida).
+    public func stop(forProcessExit: Bool = false) {
         stateLock.lock()
         let wasRunning = running
         running = false
@@ -307,6 +410,13 @@ public final class LTCGenerator {
         halfBitPhase = 0
         samplesIntoHalfBit = 0
         stateLock.unlock()
+
+        if forProcessExit {
+            // El proceso muere: no bloqueamos en engine.stop()/reset().
+            sourceNode = nil
+            if wasRunning { log("SMPTE LTC [\(name)] corte rápido (salida)") }
+            return
+        }
 
         if let node = sourceNode {
             engine.mainMixerNode.outputVolume = 0
@@ -378,7 +488,7 @@ public final class LTCGenerator {
         let isPaused   = paused
         let rate       = sampleRate
         let amplitude  = level
-        let rawRate    = playbackRate
+        let rawRate    = playbackRate + rateBias
         stateLock.unlock()
 
         guard isRunning else {
@@ -394,28 +504,43 @@ public final class LTCGenerator {
         // El tono LTC tiene que sonar mas rapido/lento con el pitch real del
         // reproductor, igual que un cabezal de cinta vari-speed: se varia el
         // ritmo de bit (samplesPerHalfBit), no solo un contador cosmetico.
-        // Un reproductor yendo hacia atras (rawRate <= 0, backspin) no se
-        // puede codificar como LTC invertido de forma fiable: se congela el
-        // tono (no se generan bits nuevos) hasta que retoma marcha adelante,
-        // y ahi el propio applyPlayhead clava la posicion correcta al vuelo.
-        let effectiveRate = min(4.0, max(0.05, rawRate))
-        let frozen = rawRate <= 0.05
+        // Un scratch/backspin real (rawRate negativo) genera LTC en
+        // reversa de verdad: el código biphase-mark es diferencial (lo que
+        // importa es el espaciado entre transiciones, no la polaridad
+        // absoluta), así que la misma señal leída al revés es un LTC
+        // inverso válido — igual que rebobinar una cinta a mano. Solo se
+        // congela el tono si la velocidad real es casi cero en cualquier
+        // dirección (reproductor parado/pausado a medio scratch).
+        let reverse = rawRate < 0
+        let magnitude = min(4.0, abs(rawRate))
+        let frozen = magnitude <= 0.05
         let bitsPerSecond      = frameRate.rawValue * 80.0
         let samplesPerHalfBit  = frozen
             ? Double.greatestFiniteMagnitude
-            : (rate / (bitsPerSecond * 2.0)) / effectiveRate
-        let dt = (rate > 0 && !frozen) ? effectiveRate / rate : 0
+            : (rate / (bitsPerSecond * 2.0)) / magnitude
+        let dt: Double = {
+            guard rate > 0, !frozen else { return 0 }
+            return reverse ? -(magnitude / rate) : (magnitude / rate)
+        }()
         var samples = [Float](repeating: 0, count: frameCount)
 
         stateLock.lock()
         for i in 0..<frameCount {
             samples[i] = polarity * amplitude
             guard !frozen else { continue }
-            playheadSeconds += dt
-            samplesIntoHalfBit += 1
-            if samplesIntoHalfBit >= samplesPerHalfBit {
-                samplesIntoHalfBit -= samplesPerHalfBit
-                advanceHalfBitLocked()
+            playheadSeconds = max(0, playheadSeconds + dt)
+            if reverse {
+                samplesIntoHalfBit -= 1
+                if samplesIntoHalfBit <= 0 {
+                    samplesIntoHalfBit += samplesPerHalfBit
+                    retreatHalfBitLocked()
+                }
+            } else {
+                samplesIntoHalfBit += 1
+                if samplesIntoHalfBit >= samplesPerHalfBit {
+                    samplesIntoHalfBit -= samplesPerHalfBit
+                    advanceHalfBitLocked()
+                }
             }
         }
         stateLock.unlock()
@@ -439,6 +564,32 @@ public final class LTCGenerator {
                 currentFrame = Self.frameNumber(seconds: playheadSeconds, fps: frameRate.rawValue)
                 loadFrameBitsLocked()
             }
+        }
+    }
+
+    /// Inverso exacto de `advanceHalfBitLocked()`, para scratch/backspin: en
+    /// vez de avanzar por los bits del frame hacia delante, retrocede uno a
+    /// uno hasta el frame anterior. Como la decodificación LTC es
+    /// diferencial (biphase-mark), deshacer las mismas transiciones en el
+    /// mismo orden pero al revés produce una señal igual de válida que si
+    /// una cinta se estuviera rebobinando a mano.
+    private func retreatHalfBitLocked() {
+        if currentFrame <= 0, bitIndex == 0, halfBitPhase == 0 {
+            return  // ya en 00:00:00:00 — no hay frame anterior que cargar
+        }
+        if halfBitPhase == 1 {
+            if bitIndex < bitsOfFrame.count, bitsOfFrame[bitIndex] == 1 { polarity = -polarity }
+            halfBitPhase = 0
+        } else {
+            polarity = -polarity
+            if bitIndex == 0 {
+                currentFrame = max(0, currentFrame - 1)
+                loadFrameBitsLocked()
+                bitIndex = max(0, bitsOfFrame.count - 1)
+            } else {
+                bitIndex -= 1
+            }
+            halfBitPhase = 1
         }
     }
 
@@ -487,7 +638,8 @@ public final class LTCFanout {
     public var frameRate: LTCGenerator.FrameRate = .fps25
     public var level: Float = 0.5
 
-    private var gens: [LTCGenerator] = []
+    /// Una salida CoreAudio → un generador (volumen independiente).
+    private var gens: [(AudioDeviceID, LTCGenerator)] = []
     private let log: (String) -> Void
 
     public init(name: String, log: @escaping (String) -> Void = { _ in }) {
@@ -498,28 +650,30 @@ public final class LTCFanout {
     deinit { stop() }
 
     public var isRunning: Bool {
-        gens.contains { $0.isRunning }
+        gens.contains { $0.1.isRunning }
     }
 
     public var outputCount: Int { gens.count }
 
-    public func start(deviceIDs: [AudioDeviceID], playhead: Double?, playing: Bool) throws {
+    public func start(deviceIDs: [AudioDeviceID], playhead: Double?, playing: Bool,
+                      levelsByDevice: [AudioDeviceID: Float] = [:]) throws {
         stop()
         let unique = Self.uniqueIDs(deviceIDs)
         let head = Self.clampedPlayhead(playhead)
-        var started: [LTCGenerator] = []
+        var started: [(AudioDeviceID, LTCGenerator)] = []
         do {
             for (i, id) in unique.enumerated() {
                 let label = unique.count > 1 ? "\(name)#\(i + 1)" : name
                 let gen = LTCGenerator(name: label, log: log)
                 gen.frameRate = frameRate
-                gen.level = level
+                let amp = levelsByDevice[id] ?? level
+                gen.level = max(0, min(1, amp))
                 gen.outputDeviceID = id == 0 ? nil : id
                 // Primer frame = posición real (0 → 00:00:00:00), no un reloj de pared.
                 gen.applyPlayhead(seconds: head, playing: false, force: true)
                 try gen.start()
                 gen.applyPlayhead(seconds: head, playing: playing, force: true)
-                started.append(gen)
+                started.append((id, gen))
             }
             gens = started
             if unique.count > 1 {
@@ -527,32 +681,45 @@ public final class LTCFanout {
             }
         } catch {
             started.forEach {
-                $0.setPaused(true)
-                $0.stop()
+                $0.1.setPaused(true)
+                $0.1.stop()
             }
             throw error
         }
     }
 
-    public func stop() {
+    public func stop(forProcessExit: Bool = false) {
         gens.forEach {
-            $0.setPaused(true)
-            $0.stop()
+            $0.1.setPaused(true)
+            $0.1.stop(forProcessExit: forProcessExit)
         }
         gens.removeAll()
+    }
+
+    /// Volumen 0…1 de una salida concreta (device CoreAudio).
+    public func setLevel(_ value: Float, deviceID: AudioDeviceID) {
+        let clamped = max(0, min(1, value))
+        for (id, gen) in gens where id == deviceID {
+            gen.setLevel(clamped)
+        }
+    }
+
+    public func setLevelAll(_ value: Float) {
+        level = max(0, min(1, value))
+        gens.forEach { $0.1.setLevel(level) }
     }
 
     /// Mismo seek/pause/play en todos los engines. Si uno se desfasó, unifica.
     public func applyPlayhead(seconds: Double, playing: Bool, rateHint: Double? = nil) {
         let head = Self.clampedPlayhead(seconds)
         let unify = needsUnify(targetSeconds: head)
-        for gen in gens {
+        for (_, gen) in gens {
             gen.applyPlayhead(seconds: head, playing: playing, force: unify, rateHint: rateHint)
         }
     }
 
     public func setPaused(_ value: Bool) {
-        gens.forEach { $0.setPaused(value) }
+        gens.forEach { $0.1.setPaused(value) }
     }
 
     /// 0 si no hay playhead: el primer frame es 00:00:00:00, no un TC inventado.
@@ -572,15 +739,17 @@ public final class LTCFanout {
         var maxF = Int.min
         var minT = Double.greatestFiniteMagnitude
         var maxT = -Double.greatestFiniteMagnitude
-        for gen in gens {
+        for (_, gen) in gens {
             let t = gen.currentPositionSeconds()
             let f = gen.currentFrameNumber()
             minF = min(minF, f)
             maxF = max(maxF, f)
             minT = min(minT, t)
             maxT = max(maxT, t)
-            if abs(f - targetFrame) > frameSlack { return true }
-            if abs(t - targetSeconds) > timeSlack { return true }
+            let frameDiff = f - targetFrame
+            if frameDiff > frameSlack || frameDiff < -frameSlack { return true }
+            let timeDiff = t - targetSeconds
+            if timeDiff > timeSlack || timeDiff < -timeSlack { return true }
         }
         if maxF - minF > 1 { return true }
         if maxT - minT > (1.5 / fps) { return true }

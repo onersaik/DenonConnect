@@ -105,10 +105,10 @@ struct ActivationView: View {
                 if mostrarAyuda {
                     VStack(alignment: .leading, spacing: 9) {
                         ayuda("Las claves SCL necesitan internet una sola vez. Después la app funciona sin red.")
-                        ayuda("En cabina, sin servidor: clave del instalador o emergencia. Si Express corre en este Mac (:3000), las SCL también se canjean en local aunque connectapp no resuelva.")
+                        ayuda("En cabina, sin servidor: clave del instalador o emergencia. Si Express corre en este Mac (:3000), las SCL también se canjean en local aunque app.entikmedia.com no resuelva.")
                         ayuda("Si la clave SCL ya está en otro equipo, libéralo desde ese Mac o escríbenos para desvincularlo.")
 
-                        Text("info@entikrecords.com")
+                        Text("info@entikmedia.com")
                             .font(.system(size: 10.5, weight: .semibold))
                             .foregroundColor(Theme.accent)
                             .padding(.top, 3)

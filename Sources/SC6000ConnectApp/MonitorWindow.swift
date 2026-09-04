@@ -17,6 +17,7 @@ struct MonitorWindowView: View {
     @EnvironmentObject var artwork: ArtworkFetcher
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var tracklist: TracklistStore
+    @EnvironmentObject var localization: LocalizationStore
 
     @AppStorage("sc.monitor.layout") private var layoutRaw = MonitorLayout.soloTC.rawValue
     @AppStorage("sc.monitor.size") private var sizeRaw = MonitorSizePreset.cabina.rawValue
@@ -101,18 +102,20 @@ struct MonitorWindowView: View {
 
     private var monitorChrome: some View {
         HStack(spacing: 8) {
-            Text("MONITOR")
+            Text(localization.t("monitor.title"))
                 .font(.system(size: 11, weight: .bold))
                 .tracking(1.4)
                 .foregroundColor(palette.textTertiary)
+                .id(localization.language)
 
             HStack(spacing: 1) {
                 ForEach(MonitorLayout.allCases) { mode in
-                    chromeTab(mode.rawValue, on: layout == mode, help: mode.help) {
+                    chromeTab(localization.t(mode.locKey), on: layout == mode, help: mode.help) {
                         layoutRaw = mode.rawValue
                     }
                 }
             }
+            .id(localization.language)
             chromeIcon(
                 systemName: isFullscreen
                     ? "arrow.down.right.and.arrow.up.left"
@@ -125,30 +128,31 @@ struct MonitorWindowView: View {
 
             Spacer(minLength: 8)
 
-            chromeTab("DÍA", on: !theme.isDark, help: "Paleta clara (tema app). Persistida.") {
+            chromeTab(localization.t("monitor.day"), on: !theme.isDark, help: "Paleta clara (tema app). Persistida.") {
                 if theme.isDark { theme.isDark = false }
             }
-            chromeTab("NOCHE", on: theme.isDark, help: "Paleta de cabina (tema app). Persistida.") {
+            chromeTab(localization.t("monitor.night"), on: theme.isDark, help: "Paleta de cabina (tema app). Persistida.") {
                 if !theme.isDark { theme.isDark = true }
             }
 
             HStack(spacing: 1) {
                 ForEach(MonitorSizePreset.allCases) { preset in
-                    chromeTab(preset.rawValue, on: sizePreset == preset, help: preset.help) {
+                    chromeTab(localization.t(preset.locKey), on: sizePreset == preset, help: preset.help) {
                         sizeRaw = preset.rawValue
                         sizeTick += 1
                     }
                 }
             }
+            .id(localization.language)
 
-            chromeTab("ENCIMA", on: alwaysOnTop, help: "Siempre encima (overlay sobre Resolume).") {
+            chromeTab(localization.t("monitor.on.top"), on: alwaysOnTop, help: "Siempre encima (overlay sobre Resolume).") {
                 alwaysOnTop.toggle()
             }
 
-            chromeTab("AUTO", on: outputs.ltcAutoFollow, help: "Fuente TC: MASTER automático (LTC / On Air / el que suena).") {
+            chromeTab(localization.t("monitor.auto"), on: outputs.ltcAutoFollow, help: "Fuente TC: MASTER automático (LTC / On Air / el que suena).") {
                 outputs.setAutoFollow(true)
             }
-            chromeTab("PIN", on: !outputs.ltcAutoFollow, help: "Fuente TC: fila anclada. No sigue al fader.") {
+            chromeTab(localization.t("monitor.pin"), on: !outputs.ltcAutoFollow, help: "Fuente TC: fila anclada. No sigue al fader.") {
                 outputs.setAutoFollow(false)
             }
 
@@ -167,20 +171,21 @@ struct MonitorWindowView: View {
 
     private var optionsBar: some View {
         HStack(spacing: 8) {
-            Text("OPCIONES")
+            Text(localization.t("monitor.options"))
                 .font(.system(size: 8, weight: .bold))
                 .tracking(0.8)
                 .foregroundColor(palette.textTertiary)
+                .id(localization.language)
 
-            optionToggle("BPM", $showBPM)
-            optionToggle("ONDA", $showWaveform)
-            optionToggle("PORTADA", $showArtwork)
-            optionToggle("ARTISTA", $showArtist)
-            optionToggle("PLAY", $showPlay)
+            optionToggle(localization.t("monitor.opt.bpm"), $showBPM)
+            optionToggle(localization.t("monitor.opt.wave"), $showWaveform)
+            optionToggle(localization.t("monitor.opt.art"), $showArtwork)
+            optionToggle(localization.t("monitor.opt.artist"), $showArtist)
+            optionToggle(localization.t("deck.play"), $showPlay)
 
             Spacer(minLength: 8)
 
-            Text("OPACIDAD")
+            Text(localization.t("monitor.opacity"))
                 .font(.system(size: 8, weight: .bold))
                 .tracking(0.5)
                 .foregroundColor(palette.textTertiary)
@@ -192,7 +197,7 @@ struct MonitorWindowView: View {
                 .frame(width: 36, alignment: .trailing)
 
             if layout == .cdj || layout == .overview {
-                Text("ZOOM")
+                Text(localization.t("header.zoom"))
                     .font(.system(size: 8, weight: .bold))
                     .tracking(0.5)
                     .foregroundColor(palette.textTertiary)
@@ -232,6 +237,7 @@ struct MonitorWindowView: View {
         .overlay(alignment: .bottom) {
             Rectangle().fill(palette.divider).frame(height: 1)
         }
+        .id(localization.language)
     }
 
     private func chromeTab(_ title: String, on: Bool, help: String, action: @escaping () -> Void) -> some View {
@@ -306,7 +312,7 @@ struct MonitorWindowView: View {
                     .onTapGesture { outputs.copyTimecode(displayedTC) }
                     .help("Clic: copiar TC")
                 if !showChrome {
-                    Text(masterLine.map { "MASTER  \($0.tag)  \($0.display.sourceBrand)" } ?? "SIN MASTER")
+                    Text(masterLine.map { "MASTER  \($0.tag)  \($0.display.sourceBrand)" } ?? localization.t("monitor.noMaster"))
                         .font(.system(size: 18, weight: .bold))
                         .tracking(1.2)
                         .foregroundColor(palette.ledOrange.opacity(0.85))
@@ -428,11 +434,11 @@ struct MonitorWindowView: View {
         let line = masterLine
         let tag = line?.tag ?? "—"
         let brand = line?.display.sourceBrand ?? "—"
-        let title = line.map { $0.display.title.isEmpty ? "SIN PISTA" : $0.display.title } ?? "SIN MASTER"
+        let title = line.map { $0.display.title.isEmpty ? localization.t("deck.notLoaded") : $0.display.title } ?? localization.t("monitor.noMaster")
         let artist = line?.display.artist ?? ""
         let playing = line?.display.isPlaying == true
         let loaded = line?.display.loaded == true
-        let playLabel = playing ? "PLAY" : (loaded ? "PAUSA" : "STOP")
+        let playLabel = playing ? localization.t("deck.play") : (loaded ? localization.t("deck.pause") : localization.t("deck.stop"))
         let playColor = playing ? palette.ledGreen : (loaded ? palette.ledYellow : palette.textTertiary)
         let bpm = line?.display.bpm ?? 0
 
@@ -528,7 +534,7 @@ struct MonitorWindowView: View {
             }
             if let master = masterLine {
                 if !master.display.isPlaying {
-                    Text(master.display.loaded ? "MASTER PAUSA" : "MASTER STOP")
+                    Text(master.display.loaded ? "MASTER \(localization.t("deck.pause"))" : "MASTER \(localization.t("deck.stop"))")
                         .font(.system(size: 10, weight: .bold))
                         .foregroundColor(palette.ledYellow)
                 }
@@ -576,13 +582,13 @@ struct MonitorWindowView: View {
             }
             .frame(width: compact ? 88 : 110, alignment: .leading)
             if showPlay {
-                Text(playing ? "PLAY" : (loaded ? "PAUSA" : "STOP"))
+                Text(playing ? localization.t("deck.play") : (loaded ? localization.t("deck.pause") : localization.t("deck.stop")))
                     .font(.system(size: 10, weight: .bold))
                     .foregroundColor(playing ? palette.ledGreen : palette.textTertiary)
                     .frame(width: 48, alignment: .leading)
             }
             VStack(alignment: .leading, spacing: 1) {
-                Text(line.display.title.isEmpty ? "SIN PISTA" : line.display.title)
+                Text(line.display.title.isEmpty ? localization.t("deck.notLoaded") : line.display.title)
                     .font(.system(size: compact ? 13 : 16, weight: .semibold))
                     .foregroundColor(loaded ? palette.ledGreen : palette.textTertiary)
                     .lineLimit(1)
@@ -660,10 +666,13 @@ struct MonitorWindowView: View {
                 .tracking(1.0)
                 .foregroundColor(palette.textTertiary)
             Spacer()
-            Text(sizePreset == .mini ? "MINI" : (alwaysOnTop ? "OVERLAY" : "VENTANA"))
+            Text(sizePreset == .mini
+                 ? localization.t("monitor.mode.mini")
+                 : (alwaysOnTop ? localization.t("monitor.mode.overlay") : localization.t("monitor.mode.window")))
                 .font(.system(size: 8, weight: .bold))
                 .tracking(0.8)
                 .foregroundColor(palette.textTertiary)
+                .id(localization.language)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 6)
@@ -752,27 +761,18 @@ struct MonitorWindowView: View {
         let rekordboxLAN = proDJLink.devices
             .filter { $0.isRekordboxExport && $0.trackLoaded && !$0.isOwnVirtualCDJ && !$0.isMixer }
             .sorted { $0.playerNumber < $1.playerNumber }
-        let denonLoaded = Self.monitorDenonLoaded(manager: manager, testLink: testLink)
-        let pioneerLoaded = !pioneerLAN.isEmpty
-            || (testLink.roster.hasPioneerTrack && !testLink.roster.denonOn)
-        // Misma resolución Auto→Dual/Serato/… que ContentView.effectiveMode.
-        let eff = Self.effectiveAppMode(
-            mode: mapping.mode,
-            denonLoaded: denonLoaded,
-            pioneerLoaded: pioneerLoaded,
-            seratoLive: software.seratoLiveCount > 0,
-            vdjLive: software.vdjLiveCount > 0,
-            rekordboxLive: !rekordboxLAN.isEmpty
-        )
-        let dual = eff == .dual
+        let mode = mapping.mode
+        let showDenon = Self.sourceVisible(.denon, mode: mode, mapping: mapping)
+        let showPioneer = Self.sourceVisible(.pioneer, mode: mode, mapping: mapping)
+        let showSerato = Self.sourceVisible(.serato, mode: mode, mapping: mapping)
+        let showVDJ = Self.sourceVisible(.virtualdj, mode: mode, mapping: mapping)
+        let showRekordbox = Self.sourceVisible(.rekordbox, mode: mode, mapping: mapping)
+        let capPioneer = mode == .auto || mode == .todos
 
-        if eff.showsDenon {
+        if showDenon {
             if testLink.roster.denonOn {
                 let n = max(testLink.roster.loadedLayers.count, 2)
                 for i in 0..<n where testLink.roster.layerLoaded(i) {
-                    // Estructura del roster: sin snapshot (evita invalidar Monitor a 60 Hz
-                    // con peaks RGB). El playhead/TC vivo va por testPlayback en filas
-                    // vía overlay al pintar; aquí solo identidad + tag.
                     let overlay = testPlayback.snapshot?.deck(i)
                     let display = DeckDisplayBuilder.testDenon(layer: i, overlay: overlay)
                     let key = DeckLabelKey.denonTest(i)
@@ -788,10 +788,9 @@ struct MonitorWindowView: View {
             }
         }
 
-        if eff.showsPioneer {
-            // Misma regla que ContentView.shouldShowTestPioneer (modo crudo, no eff).
+        if showPioneer {
             let showTestPioneer = Self.shouldShowTestPioneer(
-                mode: mapping.mode,
+                mode: mode,
                 hasPioneerTrack: testLink.roster.hasPioneerTrack,
                 denonOn: testLink.roster.denonOn,
                 lanCount: pioneerLAN.count
@@ -801,7 +800,7 @@ struct MonitorWindowView: View {
                 let display = DeckDisplayBuilder.testPioneer(overlay: overlay)
                 out.append(MonitorLine(display: display, tag: labels.tag(for: DeckLabelKey.pioneerTest) ?? display.deckTag))
             }
-            let pioneerShown = dual ? Array(pioneerLAN.prefix(4)) : pioneerLAN
+            let pioneerShown = capPioneer ? Array(pioneerLAN.prefix(4)) : pioneerLAN
             for device in pioneerShown {
                 let display = DeckDisplayBuilder.row(for: device)
                 let key = DeckLabelKey.pioneer(ip: device.ip, player: device.playerNumber)
@@ -809,15 +808,15 @@ struct MonitorWindowView: View {
             }
         }
 
-        if eff.showsSerato || eff.showsVDJ {
+        if showSerato || showVDJ {
             for deck in software.liveDecks {
-                if deck.kind == .serato, !eff.showsSerato { continue }
-                if deck.kind == .virtualdj, !eff.showsVDJ { continue }
+                if deck.kind == .serato, !showSerato { continue }
+                if deck.kind == .virtualdj, !showVDJ { continue }
                 let display = DeckDisplayBuilder.software(deck)
                 out.append(MonitorLine(display: display, tag: labels.tag(for: deck.id) ?? display.deckTag))
             }
         }
-        if eff.showsRekordbox {
+        if showRekordbox {
             for device in rekordboxLAN {
                 let display = DeckDisplayBuilder.row(for: device)
                 let key = DeckLabelKey.pioneer(ip: device.ip, player: device.playerNumber)
@@ -827,26 +826,26 @@ struct MonitorWindowView: View {
         return out
     }
 
-    /// Misma regla que ContentView.effectiveMode (Dual ≤4 CDJ + familias Auto).
-    private static func effectiveAppMode(
-        mode: AppMode,
-        denonLoaded: Bool,
-        pioneerLoaded: Bool,
-        seratoLive: Bool,
-        vdjLive: Bool,
-        rekordboxLive: Bool
-    ) -> AppMode {
-        guard mode == .auto else { return mode }
-        let families = [denonLoaded, pioneerLoaded, seratoLive, vdjLive, rekordboxLive].filter { $0 }.count
-        if families > 1 {
-            return (seratoLive || vdjLive || rekordboxLive) ? .todos : .dual
+    /// Misma regla que ContentView show* (ticks CONFIG en Auto/Todos).
+    private static func sourceVisible(_ source: AppMode, mode: AppMode, mapping: MappingController) -> Bool {
+        switch mode {
+        case .denon: return source == .denon
+        case .pioneer: return source == .pioneer
+        case .serato: return source == .serato
+        case .virtualdj: return source == .virtualdj
+        case .rekordbox: return source == .rekordbox
+        case .traktor: return source == .traktor
+        case .auto, .todos:
+            switch source {
+            case .denon: return mapping.sourceDenon
+            case .pioneer: return mapping.sourcePioneer
+            case .serato: return mapping.sourceSerato
+            case .virtualdj: return mapping.sourceVDJ
+            case .rekordbox: return mapping.sourceRekordbox
+            case .traktor: return mapping.sourceTraktor
+            default: return false
+            }
         }
-        if seratoLive { return .serato }
-        if vdjLive { return .virtualdj }
-        if rekordboxLive { return .rekordbox }
-        if pioneerLoaded { return .pioneer }
-        if denonLoaded { return .denon }
-        return .dual
     }
 
     /// Misma regla que ContentView.shouldShowTestPioneer.
@@ -860,7 +859,7 @@ struct MonitorWindowView: View {
         if mode == .pioneer { return true }
         if mode == .denon { return false }
         if denonOn { return false }
-        if mode == .dual || mode == .auto {
+        if mode == .auto || mode == .todos {
             return lanCount < 4
         }
         return true

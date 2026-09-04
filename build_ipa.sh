@@ -3,6 +3,10 @@
 # Ejecutar desde Terminal en tu Mac: bash build_ipa.sh
 # Necesitas: Xcode + cuenta Apple Developer (gratuita para instalar vía AltStore/Sideloadly,
 #            o de pago para distribución ad-hoc sin jailbreak).
+#
+# ¿Sin firma? El script ya usa CODE_SIGN_IDENTITY="-" si no hay Team ID (firma ad-hoc).
+# Un IPA 100% sin firmar NO se instala en iPad real. Con cuenta gratis: AltStore / Sideloadly.
+# Con cuenta de pago: Devices en Xcode o TestFlight.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")" && pwd)"

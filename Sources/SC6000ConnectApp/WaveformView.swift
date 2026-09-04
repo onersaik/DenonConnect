@@ -32,6 +32,8 @@ struct WaveformView: View {
     var mode: WaveformMode = .scrolling
     /// Ventana visible en segundos. CDJ ~12 s. Más corta = más detalle; más larga = más contexto.
     var windowSeconds: Double = 12.0
+    /// Velocidad real del deck (1.0 = neutro). Estira/comprime la ventana y la rejilla.
+    var playbackRate: Double = 1.0
     var canvasBackground: Color = Color.black
     var playheadColor: Color = Color.white
 
@@ -126,7 +128,11 @@ struct WaveformView: View {
         let midX = size.width / 2
         let elapsed = elapsedSeconds
         let duration = durationSeconds
-        let secPerCol = windowSeconds / Double(cols)
+        // Pitch: rate < 1 estira (más zoom), rate > 1 comprime. Mantiene
+        // la sensación de cinta / cabezal vari-speed en la onda.
+        let rate = (playbackRate.isFinite && playbackRate > 0.05) ? min(4.0, max(0.25, playbackRate)) : 1.0
+        let effectiveWindow = windowSeconds * rate
+        let secPerCol = effectiveWindow / Double(cols)
         let exact = elapsed / secPerCol
         let frac = exact - floor(exact)
         let shift = CGFloat(frac) * colW

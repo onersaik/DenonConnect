@@ -15,7 +15,7 @@ err(){ echo -e "${RED}  XX${NC}  $*"; }
 step(){ echo ""; echo -e "${BLU}==>${NC} $*"; }
 
 NOMBRE="onersaik"
-EMAIL="info@entikrecords.com"
+EMAIL="info@entikmedia.com"
 
 echo ""
 echo "  ============================================"

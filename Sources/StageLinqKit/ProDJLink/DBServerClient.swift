@@ -6,7 +6,7 @@
 //   2. Puerto 1051  → sesión TCP con saludo + GetMetadata + RenderMenu.
 //   3. Parsear ítems de respuesta (tipo 0x4101) con cadenas UTF-16BE.
 //
-// entikrecords.com
+// ENTIK MEDIA
 
 import Foundation
 #if canImport(Darwin)

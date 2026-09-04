@@ -17,7 +17,6 @@ enum MappingAction: String, CaseIterable, Identifiable, Codable {
     case modeAuto
     case modeDenon
     case modePioneer
-    case modeDual
     case modeTodos
     case layoutLarge
     case layoutSmall
@@ -48,7 +47,6 @@ enum MappingAction: String, CaseIterable, Identifiable, Codable {
         case .modeAuto:            return "Modo Auto"
         case .modeDenon:           return "Modo Denon"
         case .modePioneer:         return "Modo Pioneer"
-        case .modeDual:            return "Modo Dual"
         case .modeTodos:           return "Modo Todos"
         case .layoutLarge:         return "Vista CDJ"
         case .layoutSmall:         return "Vista Overview"
@@ -76,7 +74,7 @@ enum MappingAction: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .toggleMasterSMPTE, .toggleLTCFollow:
             return "Master"
-        case .modeAuto, .modeDenon, .modePioneer, .modeDual, .modeTodos,
+        case .modeAuto, .modeDenon, .modePioneer, .modeTodos,
              .layoutLarge, .layoutSmall, .layoutMaster, .zoomIn, .zoomOut,
              .toggleConfig, .toggleLog:
             return "Vistas"
@@ -94,7 +92,7 @@ enum MappingAction: String, CaseIterable, Identifiable, Codable {
     /// Si true, CC 0 apaga; Note/CC>64 hace toggle (o enciende si ya estaba off).
     var supportsOff: Bool {
         switch self {
-        case .modeAuto, .modeDenon, .modePioneer, .modeDual, .modeTodos,
+        case .modeAuto, .modeDenon, .modePioneer, .modeTodos,
              .layoutLarge, .layoutSmall, .layoutMaster, .zoomIn, .zoomOut:
             return false
         default:
@@ -183,10 +181,50 @@ struct MIDISourceInfo: Identifiable, Equatable {
 
 final class MappingController: ObservableObject {
 
-    @Published var mode: AppMode = .auto
+    @Published var mode: AppMode = {
+        let raw = UserDefaults.standard.string(forKey: "sc.appMode") ?? "Auto"
+        // Dual unificado en Auto.
+        if raw == "Dual" { return .auto }
+        return AppMode(rawValue: raw) ?? .auto
+    }() {
+        didSet { UserDefaults.standard.set(mode.rawValue, forKey: "sc.appMode") }
+    }
     @Published var layout: DeckLayout = .small
     @Published var showLog = false
     @Published var showOutputs = false
+
+    // MARK: Fuentes (ticks CONFIG) — Auto/Todos las respetan
+    @Published var sourceDenon: Bool = UserDefaults.standard.object(forKey: "sc.src.denon") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(sourceDenon, forKey: "sc.src.denon") }
+    }
+    @Published var sourcePioneer: Bool = UserDefaults.standard.object(forKey: "sc.src.pioneer") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(sourcePioneer, forKey: "sc.src.pioneer") }
+    }
+    @Published var sourceSerato: Bool = UserDefaults.standard.object(forKey: "sc.src.serato") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(sourceSerato, forKey: "sc.src.serato") }
+    }
+    @Published var sourceVDJ: Bool = UserDefaults.standard.object(forKey: "sc.src.vdj") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(sourceVDJ, forKey: "sc.src.vdj") }
+    }
+    @Published var sourceRekordbox: Bool = UserDefaults.standard.object(forKey: "sc.src.rekordbox") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(sourceRekordbox, forKey: "sc.src.rekordbox") }
+    }
+    @Published var sourceTraktor: Bool = UserDefaults.standard.object(forKey: "sc.src.traktor") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(sourceTraktor, forKey: "sc.src.traktor") }
+    }
+
+    func setAllSources(_ on: Bool) {
+        sourceDenon = on
+        sourcePioneer = on
+        sourceSerato = on
+        sourceVDJ = on
+        sourceRekordbox = on
+        sourceTraktor = on
+    }
+
+    var allSourcesEnabled: Bool {
+        sourceDenon && sourcePioneer && sourceSerato && sourceVDJ && sourceRekordbox && sourceTraktor
+    }
     @Published var waveformWindowSeconds: Double = {
         let raw = UserDefaults.standard.object(forKey: "sc.waveform.windowSeconds") as? Double
         return WaveformZoom.clamp(raw ?? WaveformZoom.defaultSeconds)
@@ -230,11 +268,10 @@ final class MappingController: ObservableObject {
     private static let sourceDefaultsKey = "sc.mapping.midiSource"
 
     static let defaultKeyBindings: [MappingAction: KeyBinding] = [
-        .modeDual:           KeyBinding(character: "1", keyCode: 18),
-        .modeAuto:           KeyBinding(character: "2", keyCode: 19),
-        .modeDenon:          KeyBinding(character: "3", keyCode: 20),
-        .modePioneer:        KeyBinding(character: "4", keyCode: 21),
-        .modeTodos:          KeyBinding(character: "5", keyCode: 23),
+        .modeAuto:           KeyBinding(character: "1", keyCode: 18),
+        .modeDenon:          KeyBinding(character: "2", keyCode: 19),
+        .modePioneer:        KeyBinding(character: "3", keyCode: 20),
+        .modeTodos:          KeyBinding(character: "4", keyCode: 21),
         .layoutLarge:        KeyBinding(character: "g", keyCode: 5),
         .layoutSmall:        KeyBinding(character: "p", keyCode: 35),
         .layoutMaster:       KeyBinding(character: "v", keyCode: 9),
@@ -283,7 +320,7 @@ final class MappingController: ObservableObject {
         reconnectMIDI()
     }
 
-    func stop() {
+    func stop(forProcessExit: Bool = false) {
         started = false
         if let keyMonitor {
             NSEvent.removeMonitor(keyMonitor)
@@ -291,6 +328,12 @@ final class MappingController: ObservableObject {
         }
         cancelLearn()
         disconnectMIDI()
+        // En salida de proceso, dispose de CoreMIDI suele colgar willTerminate.
+        if forProcessExit {
+            midiPort = 0
+            midiClient = 0
+            return
+        }
         if midiPort != 0 { MIDIPortDispose(midiPort); midiPort = 0 }
         if midiClient != 0 { MIDIClientDispose(midiClient); midiClient = 0 }
     }
@@ -351,13 +394,11 @@ final class MappingController: ObservableObject {
             for (action, binding) in Self.defaultKeyBindings where map[action] == nil {
                 map[action] = binding
             }
-            // Cabecera Dual/Auto/Denon/Pioneer/Todos = teclas 1–5. Si el usuario
-            // no personalizó esos cinco (fábrica antigua: 1=Auto, 4=Dual), se migran.
+            // Migración teclas antiguas Dual/Auto → Auto/Denon/Pioneer/Todos.
             let oldModes: [MappingAction: KeyBinding] = [
-                .modeAuto:    KeyBinding(character: "1", keyCode: 18),
-                .modeDenon:   KeyBinding(character: "2", keyCode: 19),
-                .modePioneer: KeyBinding(character: "3", keyCode: 20),
-                .modeDual:    KeyBinding(character: "4", keyCode: 21),
+                .modeAuto:    KeyBinding(character: "2", keyCode: 19),
+                .modeDenon:   KeyBinding(character: "3", keyCode: 20),
+                .modePioneer: KeyBinding(character: "4", keyCode: 21),
                 .modeTodos:   KeyBinding(character: "5", keyCode: 23),
             ]
             if oldModes.allSatisfy({ map[$0.key] == $0.value }) {
@@ -399,11 +440,10 @@ final class MappingController: ObservableObject {
 
     func perform(_ action: MappingAction, force: MappingForce = .toggle) {
         switch action {
-        case .modeAuto:    mode = .auto
+        case .modeAuto:    mode = .auto; if !allSourcesEnabled { setAllSources(true) }
         case .modeDenon:   mode = .denon
         case .modePioneer: mode = .pioneer
-        case .modeDual:    mode = .dual
-        case .modeTodos:   mode = .todos
+        case .modeTodos:   mode = .todos; setAllSources(true)
         case .layoutLarge: layout = .large
         case .layoutSmall: layout = .small
         case .layoutMaster: layout = .master

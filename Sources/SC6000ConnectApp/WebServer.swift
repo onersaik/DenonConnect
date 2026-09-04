@@ -35,6 +35,8 @@ public struct DeckSnapshot: Encodable {
     public var peaksLow:    [UInt8]?
     public var peaksMid:    [UInt8]?
     public var peaksHigh:   [UInt8]?
+    /// Portada en data-URL (JPEG base64) para OBS / monitor web.
+    public var artworkDataURL: String?
 
     public init(label: String, title: String, artist: String, bpm: Double,
                 isPlaying: Bool, isMaster: Bool, elapsed: Double?,
@@ -43,7 +45,8 @@ public struct DeckSnapshot: Encodable {
                 isOnAir: Bool = false, ltcSource: Bool = false,
                 tcTimecode: String? = nil, tag: String = "",
                 peaks: [UInt8]? = nil, peaksLow: [UInt8]? = nil,
-                peaksMid: [UInt8]? = nil, peaksHigh: [UInt8]? = nil) {
+                peaksMid: [UInt8]? = nil, peaksHigh: [UInt8]? = nil,
+                artworkDataURL: String? = nil) {
         self.tag = tag.isEmpty ? label : tag
         self.label = label; self.title = title; self.artist = artist
         self.key = key; self.bpm = bpm; self.pitchPct = pitchPct
@@ -57,6 +60,7 @@ public struct DeckSnapshot: Encodable {
         self.peaksLow = peaksLow
         self.peaksMid = peaksMid
         self.peaksHigh = peaksHigh
+        self.artworkDataURL = artworkDataURL
     }
 }
 
@@ -69,6 +73,8 @@ public final class WebServer {
     public var stateProvider: (() -> [DeckSnapshot])?
     /// Tracklist público (sin secretos). Misma forma que el bridge :3000.
     public var tracklistProvider: (() -> [String: Any])?
+    /// Sync LTC para WebAudio (playhead / rate / fps).
+    public var syncProvider: (() -> [String: Any])?
     /// Puerto ocupado u otro fallo de bind. Se llama fuera del hilo de UI.
     public var failureHandler: ((String) -> Void)?
 
@@ -170,12 +176,16 @@ public final class WebServer {
         if tl.isEmpty {
             tl = ["items": [], "notes": "", "annotations": [], "tc": tc, "currentId": NSNull()]
         }
-        return [
+        var payload: [String: Any] = [
             "tc": tc,
             "decks": decksObj,
             "tracklist": tl,
             "updatedAt": ISO8601DateFormatter().string(from: Date()),
         ]
+        if let sync = syncProvider?() {
+            for (k, v) in sync { payload[k] = v }
+        }
+        return payload
     }
 
     private func livePayloadString() -> String? {
@@ -224,8 +234,16 @@ public final class WebServer {
             let path = Self.parsePath(req)
             switch path {
             case "/obs":
-                let transparent = Self.parseQuery(req)["t"] == "1"
-                let resp = self.obsResponse(transparent: transparent)
+                let q = Self.parseQuery(req)
+                let opts = OBSOverlayOptions(
+                    transparent: q["t"] == "1",
+                    showTC: q["tc"] != "0",
+                    showTitle: q["title"] != "0",
+                    showArtwork: q["art"] != "0",
+                    showMeta: q["meta"] != "0",
+                    showDecks: q["decks"] != "0"
+                )
+                let resp = self.obsResponse(opts)
                 conn.send(content: resp, completion: .contentProcessed { _ in
                     conn.cancel()
                     self.connections.removeValue(forKey: key)
@@ -282,8 +300,8 @@ public final class WebServer {
         httpResponse(200, "text/html; charset=utf-8", Data(Self.monitorHTML.utf8))
     }
 
-    private func obsResponse(transparent: Bool) -> Data {
-        httpResponse(200, "text/html; charset=utf-8", Data(Self.obsHTML(transparent: transparent).utf8))
+    private func obsResponse(_ opts: OBSOverlayOptions) -> Data {
+        httpResponse(200, "text/html; charset=utf-8", Data(Self.obsHTML(opts).utf8))
     }
 
     private func httpResponse(_ code: Int, _ ct: String, _ body: Data) -> Data {
@@ -411,6 +429,11 @@ body{
 .dot.off{background:var(--muted);box-shadow:none;animation:none}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
 .tc-master{margin-left:auto;font:800 clamp(22px,5vw,34px)/1 var(--mono);letter-spacing:1px;color:var(--green)}
+.ltc-audio{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ltc-btn{border:1px solid var(--border);background:var(--elev);color:var(--muted);font:700 10px/1 var(--sans);
+  letter-spacing:.6px;padding:8px 10px;border-radius:4px;cursor:pointer}
+.ltc-btn.on{background:var(--green);color:#000;border-color:var(--green)}
+#ltcVol{width:88px;accent-color:var(--accent)}
 .meta-line{width:100%;font:10px/1.4 var(--mono);color:var(--muted)}
 .tabs{
   display:flex;gap:4px;padding:8px 12px;overflow-x:auto;-webkit-overflow-scrolling:touch;
@@ -520,6 +543,10 @@ footer{text-align:center;padding:8px 12px calc(10px + var(--safe-b));font-size:1
   <div class="brand">STAGE CONNECT</div>
   <div class="live"><div class="dot off" id="dot"></div><span id="liveLabel">CONECTANDO…</span></div>
   <div class="tc-master" id="tc">00:00:00:00</div>
+  <div class="ltc-audio" id="ltcAudioBar">
+    <button type="button" id="ltcBtn" class="ltc-btn" title="SMPTE LTC por auriculares / Bluetooth del Mac (salida del navegador)">TC AUDIO OFF</button>
+    <input type="range" id="ltcVol" min="0" max="100" value="50" title="Volumen LTC web">
+  </div>
   <div class="meta-line" id="status">Monitor cabina · SSE local</div>
 </header>
 <nav class="tabs" role="tablist" aria-label="Vistas del monitor">
@@ -536,7 +563,7 @@ footer{text-align:center;padding:8px 12px calc(10px + var(--safe-b));font-size:1
   <section class="panel" id="panel-tracklist" role="tabpanel"></section>
   <section class="panel" id="panel-monitor" role="tabpanel"></section>
 </main>
-<footer>Monitor en vivo · sin secretos · ENTIK MEDIA</footer>
+<footer>Monitor en vivo · sin secretos · STAGE CONNECT</footer>
 <script>
 (function(){
 const TAB_KEY='sc.monitor.tab';
@@ -792,10 +819,113 @@ function render(next){
   last=Date.now();
   state=normalize(next);
   if(!state.tracklist) state.tracklist={items:[],annotations:[],notes:''};
+  if(typeof state.playhead==='number') ltcSync.playhead=state.playhead;
+  if(typeof state.playing==='boolean') ltcSync.playing=state.playing;
+  if(typeof state.rate==='number'&&state.rate>0) ltcSync.rate=state.rate;
+  if(typeof state.fps==='number'&&state.fps>0) ltcSync.fps=state.fps;
+  ltcSync.wall=performance.now()/1000;
   document.getElementById('dot').className='dot';
   document.getElementById('liveLabel').textContent='EN VIVO';
   paint();
 }
+
+/* ── SMPTE LTC por WebAudio (auriculares / BT del Mac vía el navegador) ── */
+var ltcSync={playhead:0,playing:false,rate:1,fps:25,wall:0};
+var ltcEng={on:false,ctx:null,node:null,level:0.5,bits:[],bi:0,half:0,samp:0,pol:1,ph:0};
+function encodeLTCFrame(frameNumber,fps){
+  var n=Math.max(1,Math.floor(fps||25));
+  var total=Math.max(0,frameNumber|0);
+  var frames=total%n, totalSec=(total/n)|0;
+  var seconds=totalSec%60, minutes=((totalSec/60)|0)%60, hours=((totalSec/3600)|0)%24;
+  var bits=new Array(80).fill(0);
+  function write(v,off,count){for(var i=0;i<count;i++) bits[off+i]=(v>>i)&1}
+  write(frames%10,0,4); write((frames/10)|0,8,2);
+  write(seconds%10,16,4); write((seconds/10)|0,24,3);
+  write(minutes%10,32,4); write((minutes/10)|0,40,3);
+  write(hours%10,48,4); write((hours/10)|0,56,2);
+  var sync=[0,0,1,1,1,1,1,1,1,1,1,1,1,1,0,1];
+  for(var i=0;i<16;i++) bits[64+i]=sync[i];
+  return bits;
+}
+function ltcLoadBits(){
+  var fps=ltcSync.fps||25;
+  var frame=Math.max(0,Math.floor(ltcEng.ph*fps));
+  ltcEng.bits=encodeLTCFrame(frame,fps);
+  ltcEng.bi=0; ltcEng.half=0; ltcEng.samp=0;
+}
+function ltcAdvanceHalf(){
+  if(ltcEng.half===0){
+    if(ltcEng.bi<ltcEng.bits.length && ltcEng.bits[ltcEng.bi]===1) ltcEng.pol=-ltcEng.pol;
+    ltcEng.half=1;
+  } else {
+    ltcEng.pol=-ltcEng.pol; ltcEng.half=0; ltcEng.bi++;
+    if(ltcEng.bi>=ltcEng.bits.length){
+      ltcLoadBits();
+    }
+  }
+}
+function estimatedPlayhead(){
+  var base=ltcSync.playhead||0;
+  if(!ltcSync.playing) return base;
+  var dt=(performance.now()/1000)-(ltcSync.wall||0);
+  return Math.max(0, base + dt * (ltcSync.rate||1));
+}
+async function startLTCAudio(){
+  if(ltcEng.on) return;
+  var AC=window.AudioContext||window.webkitAudioContext;
+  if(!AC){ alert('Este navegador no soporta Web Audio'); return; }
+  var ctx=new AC();
+  await ctx.resume();
+  var node=ctx.createScriptProcessor(2048,0,1);
+  ltcEng.ctx=ctx; ltcEng.node=node; ltcEng.on=true;
+  ltcEng.ph=estimatedPlayhead();
+  ltcLoadBits();
+  node.onaudioprocess=function(ev){
+    var out=ev.outputBuffer.getChannelData(0);
+    var sr=ctx.sampleRate;
+    var fps=ltcSync.fps||25;
+    var rate=Math.min(4,Math.max(0.05, ltcSync.playing ? (ltcSync.rate||1) : 0.0001));
+    var samplesPerHalf=sr/((fps*80)*2)/rate;
+    var dt=rate/sr;
+    var amp=ltcEng.level;
+    if(!ltcSync.playing){
+      for(var i=0;i<out.length;i++) out[i]=0;
+      ltcEng.ph=estimatedPlayhead();
+      return;
+    }
+    // Resync suave al playhead de la app
+    var target=estimatedPlayhead();
+    if(Math.abs(target-ltcEng.ph)>0.08){
+      ltcEng.ph=target;
+      ltcLoadBits();
+    }
+    for(var i=0;i<out.length;i++){
+      out[i]=ltcEng.pol*amp;
+      ltcEng.ph+=dt;
+      ltcEng.samp+=1;
+      if(ltcEng.samp>=samplesPerHalf){
+        ltcEng.samp-=samplesPerHalf;
+        ltcAdvanceHalf();
+      }
+    }
+  };
+  node.connect(ctx.destination);
+  var btn=document.getElementById('ltcBtn');
+  if(btn){ btn.textContent='TC AUDIO ON'; btn.classList.add('on'); }
+}
+function stopLTCAudio(){
+  if(ltcEng.node){ try{ltcEng.node.disconnect()}catch(_){ } }
+  if(ltcEng.ctx){ try{ltcEng.ctx.close()}catch(_){ } }
+  ltcEng.node=null; ltcEng.ctx=null; ltcEng.on=false;
+  var btn=document.getElementById('ltcBtn');
+  if(btn){ btn.textContent='TC AUDIO OFF'; btn.classList.remove('on'); }
+}
+function toggleLTCAudio(){ if(ltcEng.on) stopLTCAudio(); else startLTCAudio(); }
+document.getElementById('ltcBtn') && document.getElementById('ltcBtn').addEventListener('click', toggleLTCAudio);
+document.getElementById('ltcVol') && document.getElementById('ltcVol').addEventListener('input', function(e){
+  ltcEng.level=Math.max(0,Math.min(1,(+e.target.value)/100));
+});
+
 function connect(){
   if(es){es.close();es=null}
   es=new EventSource('/events');
@@ -826,8 +956,22 @@ window.addEventListener('resize',()=>{
 </html>
 """#
 
-    private static func obsHTML(transparent: Bool) -> String {
-        let bg = transparent ? "transparent" : "#000"
+    private struct OBSOverlayOptions {
+        var transparent: Bool
+        var showTC: Bool
+        var showTitle: Bool
+        var showArtwork: Bool
+        var showMeta: Bool
+        var showDecks: Bool
+    }
+
+    private static func obsHTML(_ opts: OBSOverlayOptions) -> String {
+        let bg = opts.transparent ? "transparent" : "#000"
+        let showTC = opts.showTC ? "true" : "false"
+        let showTitle = opts.showTitle ? "true" : "false"
+        let showArt = opts.showArtwork ? "true" : "false"
+        let showMeta = opts.showMeta ? "true" : "false"
+        let showDecks = opts.showDecks ? "true" : "false"
         return #"""
 <!DOCTYPE html>
 <html lang="es">
@@ -838,35 +982,67 @@ window.addEventListener('resize',()=>{
 html,body{margin:0;padding:0;width:1920px;height:1080px;overflow:hidden;background:\#(bg);color:#fff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
 .wrap{display:flex;flex-direction:column;height:1080px;padding:36px 48px;box-sizing:border-box}
 .tc{font:800 168px/0.9 'SF Mono','Menlo',monospace;letter-spacing:-4px;color:#fff;text-shadow:0 0 24px rgba(0,0,0,.55)}
-.master{margin-top:8px;font-size:28px;font-weight:700;letter-spacing:2px;color:#61ff7a}
+.master-row{display:flex;align-items:center;gap:24px;margin-top:12px}
+.art{width:120px;height:120px;object-fit:cover;border-radius:4px;background:#111;flex-shrink:0}
+.master{font-size:28px;font-weight:700;letter-spacing:2px;color:#61ff7a}
+.meta{margin-top:6px;font:700 22px 'SF Mono',monospace;color:#ff7a17}
 .decks{margin-top:auto;display:grid;grid-template-columns:repeat(4,1fr);gap:18px}
 .deck{min-height:118px}
 .tag{font-size:13px;font-weight:800;letter-spacing:1.4px;color:#949494}
 .play{color:#61ff7a}
 .title{font-size:22px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .bpm{font:700 20px 'SF Mono',monospace;color:#ff7a17}
+.hidden{display:none!important}
 </style>
 </head>
 <body>
 <div class="wrap">
   <div class="tc" id="tc">00:00:00:00</div>
-  <div class="master" id="master"></div>
+  <div class="master-row">
+    <img class="art hidden" id="art" alt="">
+    <div>
+      <div class="master" id="master"></div>
+      <div class="meta" id="meta"></div>
+    </div>
+  </div>
   <div class="decks" id="decks"></div>
 </div>
 <script>
+const OPT={tc:\#(showTC),title:\#(showTitle),art:\#(showArt),meta:\#(showMeta),decks:\#(showDecks)};
 function esc(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')}
 function paint(raw){
   const decks=Array.isArray(raw)?raw:(raw&&raw.decks)||[];
   const master=decks.find(d=>d.isMaster)||decks.find(d=>d.isPlaying)||decks[0];
-  const tc=(raw&&raw.tc)||(master&&master.tcTimecode)||(decks.find(d=>d.tcTimecode)||{}).tcTimecode||'00:00:00:00';
-  document.getElementById('tc').textContent=tc;
-  document.getElementById('master').textContent=master?(master.title||''):'';
-  document.getElementById('decks').innerHTML=decks.slice(0,4).map(d=>`
-    <div class="deck">
-      <div class="tag${d.isPlaying?' play':''}">${esc((d.tag||d.label||'').toUpperCase())}${d.isPlaying?'  PLAY':''}</div>
-      <div class="title">${esc(d.title||'—')}</div>
-      <div class="bpm">${d.bpm>0?d.bpm.toFixed(2)+' BPM':''}</div>
-    </div>`).join('');
+  const tcEl=document.getElementById('tc');
+  if(OPT.tc){
+    const tc=(raw&&raw.tc)||(master&&master.tcTimecode)||(decks.find(d=>d.tcTimecode)||{}).tcTimecode||'00:00:00:00';
+    tcEl.textContent=tc; tcEl.classList.remove('hidden');
+  } else { tcEl.classList.add('hidden'); }
+  const titleEl=document.getElementById('master');
+  if(OPT.title){ titleEl.textContent=master?(master.title||''):''; titleEl.classList.remove('hidden'); }
+  else { titleEl.classList.add('hidden'); }
+  const metaEl=document.getElementById('meta');
+  if(OPT.meta && master){
+    const bits=[];
+    if(master.key) bits.push(master.key);
+    if(master.bpm>0) bits.push(master.bpm.toFixed(2)+' BPM');
+    if(master.artist) bits.push(master.artist);
+    metaEl.textContent=bits.join('  ·  '); metaEl.classList.remove('hidden');
+  } else { metaEl.classList.add('hidden'); }
+  const artEl=document.getElementById('art');
+  if(OPT.art && master && master.artworkDataURL){
+    artEl.src=master.artworkDataURL; artEl.classList.remove('hidden');
+  } else { artEl.classList.add('hidden'); artEl.removeAttribute('src'); }
+  const decksEl=document.getElementById('decks');
+  if(OPT.decks){
+    decksEl.classList.remove('hidden');
+    decksEl.innerHTML=decks.slice(0,4).map(d=>`
+      <div class="deck">
+        <div class="tag${d.isPlaying?' play':''}">${esc((d.tag||d.label||'').toUpperCase())}${d.isPlaying?'  PLAY':''}</div>
+        <div class="title">${esc(d.title||'—')}</div>
+        <div class="bpm">${d.bpm>0?d.bpm.toFixed(2)+' BPM':''}</div>
+      </div>`).join('');
+  } else { decksEl.classList.add('hidden'); decksEl.innerHTML=''; }
 }
 const ev=new EventSource('/events');
 ev.onmessage=e=>{try{paint(JSON.parse(e.data))}catch(_){}};

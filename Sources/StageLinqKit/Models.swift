@@ -28,6 +28,8 @@ public final class DeckState: ObservableObject, Identifiable {
     @Published public var loopInPosition: Double = -1    // segundos; -1 = sin loop
     @Published public var loopOutPosition: Double = -1
     @Published public var loopSizeBeats: Double = 0
+    /// QuickLoop 1…8 activos (Engine OS).
+    @Published public var quickLoops: [Bool] = Array(repeating: false, count: 8)
     @Published public var keyLock: Bool = false
     @Published public var trackLength: Double = 0 // segundos
     @Published public var volume: Double = 0

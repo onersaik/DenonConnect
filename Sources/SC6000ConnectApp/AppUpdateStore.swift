@@ -25,10 +25,10 @@ final class AppUpdateStore: ObservableObject {
     @Published private(set) var statusMessage: String = ""
     @Published var lastError: String = ""
 
-    /// Misma cadena que LicenseStore (Express local → connectapp).
+    /// Misma cadena que LicenseStore (Express local → app.entikmedia.com).
     private static let serverBases = [
         "http://127.0.0.1:3000",
-        "https://connectapp.entikmedia.com",
+        "https://app.entikmedia.com",
     ]
 
     private var downloadTask: URLSessionDownloadTask?
