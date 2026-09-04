@@ -2,8 +2,8 @@ swift-driver version: 1.90.11.1 Apple Swift version 5.10 (swiftlang-5.10.0.13 cl
 Target: arm64-apple-macosx14.0
 Building for debugging...
 [0/12] Write sources
-[1/12] Write SC6000ConnectApp-entitlement.plist
-[4/12] Write DJSimulatorApp-entitlement.plist
+[3/12] Write DJSimulatorApp-entitlement.plist
+[3/12] Write SC6000ConnectApp-entitlement.plist
 [5/12] Write swift-version-76B232A4806BA581.txt
 [7/31] Emitting module StageLinqKit
 [8/39] Compiling StageLinqKit SyncSnapshot.swift
@@ -92,7 +92,8 @@ Building for debugging...
 [40/66] Compiling SC6000ConnectApp WaveformView.swift
 [41/66] Compiling SC6000ConnectApp WaveformZoom.swift
 [42/66] Compiling SC6000ConnectApp WebServer.swift
-[43/66] Compiling DJSimulatorApp DJSimulatorApp.swift
+[43/66] Emitting module DJSimulatorApp
+[44/66] Compiling DJSimulatorApp DJSimulatorApp.swift
 /Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:255:40: warning: reference to captured var 'self' in concurrently-executing code; this is an error in Swift 6
             DispatchQueue.main.async { self?.syncPositions() }
                                        ^
@@ -138,7 +139,6 @@ Building for debugging...
 /Users/runner/work/DenonConnect/DenonConnect/Sources/DJSimulatorApp/DJSimulatorApp.swift:1070:33: warning: 'stringValue' was deprecated in macOS 13.0: Use load(.stringValue) instead
                 if let s = item.stringValue { comment = s.trimmingCharacters(in: .whitespacesAndNewlines) }
                                 ^
-[44/66] Emitting module DJSimulatorApp
 [44/66] Write Objects.LinkFileList
 [45/66] Linking DJSimulatorApp
 [46/66] Applying DJSimulatorApp
@@ -161,7 +161,7 @@ Building for debugging...
 [63/66] Write Objects.LinkFileList
 [64/66] Linking SC6000ConnectApp
 [65/66] Applying SC6000ConnectApp
-Build complete! (27.73s)
+Build complete! (28.61s)
 === RELEASE ===
 Building for production...
 [0/8] Write sources
@@ -224,6 +224,6 @@ Building for production...
 [9/11] Compiling SC6000ConnectApp ActivationView.swift
 [9/11] Write Objects.LinkFileList
 [10/11] Linking SC6000ConnectApp
-Build complete! (57.86s)
+Build complete! (48.81s)
 
-=== resultado: build=success release=success sha=3b6559a9f13f26f85897899cce734ef5b8a72098 ===
+=== resultado: build=success release=success sha=7629686b4202d1b3eeff1c8ce0e27366e4ff4892 ===
