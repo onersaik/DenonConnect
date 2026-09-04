@@ -42,26 +42,26 @@ jobs:
         run: |
           set -e
           BIN_PATH="$(swift build -c release --show-bin-path)"
-          APP="SC6000 Connect.app"
+          APP="STAGE CONNECT.app"
           rm -rf "$APP"
           mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-          cp "$BIN_PATH/SC6000ConnectApp" "$APP/Contents/MacOS/SC6000Connect"
+          cp "$BIN_PATH/SC6000ConnectApp" "$APP/Contents/MacOS/SC6000ConnectApp"
           cp packaging/Info.plist "$APP/Contents/Info.plist"
           cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
           printf 'APPL????' > "$APP/Contents/PkgInfo"
-          chmod +x "$APP/Contents/MacOS/SC6000Connect"
+          chmod +x "$APP/Contents/MacOS/SC6000ConnectApp"
           # Firma ad-hoc: no evita el aviso de Gatekeeper, pero deja el bundle
           # consistente y estable frente a las comprobaciones de macOS.
           codesign --force --deep --sign - "$APP" || echo "firma ad-hoc no disponible"
-          ditto -c -k --keepParent "$APP" SC6000Connect.zip
-          ls -la SC6000Connect.zip
+          ditto -c -k --keepParent "$APP" STAGECONNECT.zip
+          ls -la STAGECONNECT.zip
 
       - name: Subir la app como artefacto descargable
         if: steps.package.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
-          name: SC6000-Connect-app
-          path: SC6000Connect.zip
+          name: STAGE-CONNECT-app
+          path: STAGECONNECT.zip
           retention-days: 30
 
       # Publica el log en el propio repositorio para poder leerlo sin iniciar
